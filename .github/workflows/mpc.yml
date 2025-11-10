@@ -1,7 +1,9 @@
 name: MPC Bot
 
 on:
-  workflow_dispatch:   # lo lanci manualmente da "Run workflow"
+  schedule:
+    - cron: "0 8,20 * * *"
+  workflow_dispatch:
 
 jobs:
   run:
@@ -9,11 +11,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - run: pip install requests beautifulsoup4
-
       - run: python mpc_archive.py
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
