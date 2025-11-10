@@ -132,7 +132,7 @@ def save_data(data):
 
 # ---------------- DISCORD ----------------
 def send_to_discord(data):
-    """Crea embed compatti, ben leggibili e con statistiche"""
+    """Crea embed compatti e ben leggibili, con formattazione Markdown ottimizzata per Discord"""
     if not DISCORD_WEBHOOK:
         print("❌ Errore: variabile DISCORD_WEBHOOK non trovata.")
         return
@@ -146,22 +146,18 @@ def send_to_discord(data):
     hazardous = sum(1 for m in moid_vals if m < 0.01)
     avg_H = round(sum(d.get("H", 0) for d in data if isinstance(d.get("H"), (int, float))) / len(data), 2) if data else 0
 
-    # Crea un embed per ciascun oggetto
+    # Embed per ogni oggetto
     for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
-        moid = d.get("MOID", 1.0)
-        try:
-            moid = float(moid)
-        except:
-            moid = 1.0
+        moid = float(d.get("MOID", 1.0)) if isinstance(d.get("MOID"), (int, float, str)) else 1.0
 
-        # 🎨 Colore dinamico
-        color = 0x3388ff  # blu
+        # Colore dinamico
+        color = 0x3388ff
         if moid < 0.05:
-            color = 0xFFD700  # giallo
+            color = 0xFFD700
         if moid < 0.01:
-            color = 0xFF5555  # rosso
+            color = 0xFF5555
 
-        # 🌕 Emoji per H
+        # Emoji in base alla magnitudine
         H = d.get("H", "?")
         emoji_H = "🌑"
         if isinstance(H, (int, float)):
@@ -170,40 +166,48 @@ def send_to_discord(data):
             elif H < 26:
                 emoji_H = "🌕"
 
+        # Corpo testo
         desc = [
-            f"{emoji_H} **Magnitudine assoluta (H):** {H} — Luminosità intrinseca",
-            f"🌀 **Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
-            f"📐 **Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica",
-            f"🌍 **MOID:** {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
-            f"📅 **Data di emissione:** {d.get('issued','?')}",
-            f"🔗 [Pagina MPEC]({d.get('url','')})"
+            f"**{emoji_H} Magnitudine assoluta (H):** {H} — Luminosità intrinseca",
+            f"**🌀 Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
+            f"**📐 Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica",
+            f"**🌍 MOID:** {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
+            f"**📅 Data di emissione:** {d.get('issued','?')}",
+            f"**🔗 [Pagina MPEC]({d.get('url','')})**",
+            "────────────────────────"
         ]
 
+        # Aggiungi osservazioni
         if d.get("observations"):
-            obs_preview = "\n".join(d["observations"][:2])
-            desc.append(f"\n👁️ **Osservazioni ({OBSERVATORY_CODE}):**\n```{obs_preview}```")
+            desc.append(f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n```plaintext\n" + "\n".join(d["observations"]) + "\n```")
 
+        # Aggiungi strumento
         if d.get("observatory_details"):
-            desc.append(f"🔭 **Strumento:** {d['observatory_details']}")
+            desc.append(f"🔭 **Strumento**\n{d['observatory_details']}")
+
+        # Footer coerente
+        footer = f"{OBSERVATORY_NAME} • Aggiornato al {now}"
 
         embeds.append({
             "title": f"MPEC {d.get('mpec_code','?')} — {d.get('object','?')}",
             "description": "\n".join(desc),
             "color": color,
-            "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
+            "footer": {"text": footer}
         })
 
-    # Messaggio principale
+    # Messaggio principale (fuori dagli embed)
     header = (
-        f"🪐 **Archivio MPEC ({OBSERVATORY_NAME})**\n"
-        f"Aggiornato al {now}\n"
-        f"Totale MPEC con codice {OBSERVATORY_CODE}: **{len(data)}**\n\n"
-        f"📊 **Statistiche generali:**\n"
-        f"• Oggetti con MOID < 0.05 AU: {close_approaches}\n"
-        f"• Potenzialmente pericolosi (MOID < 0.01 AU): {hazardous}\n"
-        f"• Magnitudine media (H): {avg_H}"
+        f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
+        f"Aggiornato al **{now}**\n"
+        f"Totale MPEC con codice **{OBSERVATORY_CODE}: {len(data)}**\n\n"
+        f"📊 **Statistiche generali**\n"
+        f"• Oggetti con MOID < 0.05 AU: **{close_approaches}**\n"
+        f"• Potenzialmente pericolosi (MOID < 0.01 AU): **{hazardous}**\n"
+        f"• Magnitudine media (H): **{avg_H}**\n"
+        "────────────────────────"
     )
 
+    # Invio o aggiornamento messaggio Discord
     message_id = None
     if os.path.exists(MESSAGE_ID_FILE):
         with open(MESSAGE_ID_FILE, "r") as f:
