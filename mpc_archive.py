@@ -15,8 +15,8 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 # 🔭 Codice e nome dell’osservatorio
 OBSERVATORY_CODE = "L47"
 OBSERVATORY_NAME = "Osservatorio Astronomico, Piobbico"
-#BSERVATORY_CODE = "D65"//
-#OBSERVATORY_NAME = "Osservatorio Astronomico G. Beltrame"//
+# OBSERVATORY_CODE = "D65"
+# OBSERVATORY_NAME = "Osservatorio Astronomico G. Beltrame"
 # ----------------------------------------
 
 EXCLUDED_KEYWORDS = [
@@ -46,7 +46,7 @@ def fetch_recent_mpecs():
 
 
 def fetch_mpec_details(url):
-    """Scarica e analizza una singola MPEC: orbita + osservazioni del tuo osservatorio (solo se D65 è accreditato ufficialmente)"""
+    """Scarica e analizza una singola MPEC: orbita + osservazioni del tuo osservatorio"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -57,23 +57,22 @@ def fetch_mpec_details(url):
     text = r.text
     data = {"url": url}
 
-    # ✅ Verifica che il tuo osservatorio compaia nella sezione "Observer details"
+    # ✅ Verifica presenza osservatorio nel blocco 'Observer details'
     obs_block = re.search(r"Observer details:(.*?)(Orbital elements|Ephemeris|Residuals|M\. P\. C\.|$)", text, re.S | re.I)
     if not obs_block or OBSERVATORY_CODE not in obs_block.group(1):
-        # Esclude MPEC che non menzionano l'osservatorio nei dettagli ufficiali
-        return None
+        return None  # esclude MPEC non associati a L47
 
     # Oggetto
     obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", text)
     if obj_match:
         data["object"] = obj_match.group(1).strip()
 
-    # Data di emissione
+    # Data emissione
     issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
     if issued:
         data["issued"] = issued.group(1)
 
-    # Parametri orbitali principali
+    # Parametri orbitali
     orb = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
     if orb:
         block = orb.group(1).replace("\r", " ")
@@ -96,19 +95,21 @@ def fetch_mpec_details(url):
                 except ValueError:
                     data[key] = m.group(1)
 
-    # Estrarre solo le osservazioni realmente associate al codice D65
-    obs_pattern = re.compile(rf"^.*{OBSERVATORY_CODE}.*$", re.M)
-    obs_lines = obs_pattern.findall(text)
-    if obs_lines:
-        data["observations"] = [line.strip() for line in obs_lines]
+    # ✅ Estrai solo osservazioni nel blocco "Observations"
+    obs_section = re.search(r"Observations:(.*?)(Observer details:|Orbital elements:|Residuals:|Ephemeris:|$)", text, re.S | re.I)
+    if obs_section:
+        obs_text = obs_section.group(1)
+        obs_pattern = re.compile(rf"^.*{OBSERVATORY_CODE}.*$", re.M)
+        obs_lines = obs_pattern.findall(obs_text)
+        if obs_lines:
+            data["observations"] = [line.strip() for line in obs_lines]
 
-    # Estrarre la descrizione dello strumento usato (solo se menzionato nel blocco)
-    obs_details = re.search(
-        rf"{OBSERVATORY_CODE}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)",
-        text, re.S | re.I
-    )
-    if obs_details:
-        data["observatory_details"] = obs_details.group(1).strip()
+    # ✅ Dettagli osservatorio (pulisce HTML)
+    obs_details_block = re.search(rf"{OBSERVATORY_CODE}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)", text, re.S | re.I)
+    if obs_details_block:
+        raw = obs_details_block.group(1).strip()
+        clean = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+        data["observatory_details"] = clean
 
     # Codice MPEC
     code_match = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
@@ -124,15 +125,12 @@ def load_existing_data():
     with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def save_data(data):
     with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-
 # ---------------- DISCORD ----------------
 def send_to_discord(data):
-    """Crea embed compatti e ben leggibili, con formattazione Markdown ottimizzata per Discord"""
     if not DISCORD_WEBHOOK:
         print("❌ Errore: variabile DISCORD_WEBHOOK non trovata.")
         return
@@ -146,7 +144,6 @@ def send_to_discord(data):
     hazardous = sum(1 for m in moid_vals if m < 0.01)
     avg_H = round(sum(d.get("H", 0) for d in data if isinstance(d.get("H"), (int, float))) / len(data), 2) if data else 0
 
-    # Embed per ogni oggetto
     for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
         moid = float(d.get("MOID", 1.0)) if isinstance(d.get("MOID"), (int, float, str)) else 1.0
 
@@ -157,7 +154,6 @@ def send_to_discord(data):
         if moid < 0.01:
             color = 0xFF5555
 
-        # Emoji in base alla magnitudine
         H = d.get("H", "?")
         emoji_H = "🌑"
         if isinstance(H, (int, float)):
@@ -166,7 +162,6 @@ def send_to_discord(data):
             elif H < 26:
                 emoji_H = "🌕"
 
-        # Corpo testo
         desc = [
             f"**{emoji_H} Magnitudine assoluta (H):** {H} — Luminosità intrinseca",
             f"**🌀 Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
@@ -177,25 +172,20 @@ def send_to_discord(data):
             "────────────────────────"
         ]
 
-        # Aggiungi osservazioni
         if d.get("observations"):
             desc.append(f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n```plaintext\n" + "\n".join(d["observations"]) + "\n```")
 
-        # Aggiungi strumento
         if d.get("observatory_details"):
-            desc.append(f"🔭 **Strumento**\n{d['observatory_details']}")
-
-        # Footer coerente
-        footer = f"{OBSERVATORY_NAME} • Aggiornato al {now}"
+            desc.append(f"🔭 **Strumento / Dettagli osservatorio**\n{d['observatory_details']}")
 
         embeds.append({
             "title": f"MPEC {d.get('mpec_code','?')} — {d.get('object','?')}",
             "description": "\n".join(desc),
             "color": color,
-            "footer": {"text": footer}
+            "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
         })
 
-    # Messaggio principale (fuori dagli embed)
+    # Messaggio principale
     header = (
         f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
         f"Aggiornato al **{now}**\n"
@@ -207,14 +197,13 @@ def send_to_discord(data):
         "────────────────────────"
     )
 
-    # Invio o aggiornamento messaggio Discord
+    headers = {"Content-Type": "application/json"}
+    payload = {"content": header, "embeds": embeds}
+
     message_id = None
     if os.path.exists(MESSAGE_ID_FILE):
         with open(MESSAGE_ID_FILE, "r") as f:
             message_id = f.read().strip()
-
-    headers = {"Content-Type": "application/json"}
-    payload = {"content": header, "embeds": embeds}
 
     if message_id:
         patch_url = DISCORD_WEBHOOK + f"/messages/{message_id}"
