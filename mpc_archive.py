@@ -2,95 +2,152 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import os
+from datetime import datetime
 
-# ---------------- CONFIG ----------------
-OBSERVATORY_CODE = "D65"  # codice MPC del tuo osservatorio
-YEARS = [2024, 2025]      # anni da scansionare
-BASE_URL = "https://www.minorplanetcenter.net/mpec/{year}/"
-ARCHIVE_FILE = "archive.json"
-TABLE_FILE = "archive_table.md"
-# ----------------------------------------
+# ==========================
+# CONFIG
+# ==========================
+OBSERVATORY_CODE = "D65"  # Codice MPC del tuo osservatorio
+YEARS = ["K24", "K25"]    # Anni da scansionare (K24=2024, K25=2025)
+BASE_URL = "https://www.minorplanetcenter.net/mpec"
+CACHE_FILE = "mpc_cache.json"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")  # webhook segreto GitHub
+TABLE_FILE = "mpc_table.md"
 
-def fetch_mpec_links(year: int):
-    """Scarica tutti i link MPEC per un determinato anno"""
-    url = BASE_URL.format(year=year)
-    print(f"📅 Scansione MPEC {year} da {url}")
-    r = requests.get(url)
-    if r.status_code != 200:
-        print(f"⚠️ Errore nel recupero MPEC {year}: {r.status_code}")
+# ==========================
+# FUNZIONI
+# ==========================
+
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_cache(data):
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+def fetch_mpec_list(year_code):
+    """Ottiene l'elenco delle MPEC per l'anno dato (es: K25)."""
+    url = f"{BASE_URL}/{year_code}/"
+    print(f"📅 Scansione MPEC {year_code} da {url}")
+    try:
+        r = requests.get(url, timeout=20)
+        if r.status_code != 200:
+            print(f"⚠️ Errore nel recupero MPEC {year_code}: {r.status_code}")
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        links = [a["href"] for a in soup.find_all("a", href=True) if a["href"].endswith(".html")]
+        return [f"{url}{link}" for link in links]
+    except Exception as e:
+        print(f"⚠️ Errore durante la scansione {year_code}: {e}")
         return []
 
-    soup = BeautifulSoup(r.text, "html.parser")
-    links = []
-    for a in soup.find_all("a"):
-        href = a.get("href")
-        if href and href.endswith(".html"):
-            full_url = f"{url}{href}"
-            links.append(full_url)
-    print(f"✅ Trovate {len(links)} MPEC nel {year}")
-    return links
-
-
-def fetch_mpec_data(url: str):
-    """Scarica il contenuto di una MPEC e verifica se contiene il codice osservatorio"""
+def parse_mpec_page(url):
+    """Analizza una singola pagina MPEC e restituisce dati se contiene il codice osservatorio."""
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=20)
         if r.status_code != 200:
             return None
         text = r.text
-        if OBSERVATORY_CODE in text:
-            soup = BeautifulSoup(text, "html.parser")
-            title = soup.find("title").get_text(strip=True) if soup.find("title") else "Senza titolo"
-            return {"title": title, "url": url}
+        if OBSERVATORY_CODE not in text:
+            return None
+
+        soup = BeautifulSoup(text, "html.parser")
+        title = soup.find("title").text.strip() if soup.find("title") else url.split("/")[-1]
+        lines = text.splitlines()
+
+        # Cerca designazione e info base
+        designation = ""
+        h_mag = ""
+        moid = ""
+        orbit_type = ""
+        for line in lines:
+            if "Designation:" in line:
+                designation = line.split(":")[-1].strip()
+            if "H =" in line:
+                h_mag = line.split("H =")[-1].split()[0]
+            if "MOID" in line:
+                moid = line.split("MOID")[-1].split()[0]
+            if "Orbit type" in line or "Orbit class" in line:
+                orbit_type = line.split(":")[-1].strip()
+
+        # fallback se non trovate
+        designation = designation or title.replace("MPEC", "").strip()
+
+        return {
+            "designation": designation,
+            "title": title,
+            "url": url,
+            "h_mag": h_mag or "n/d",
+            "moid": moid or "n/d",
+            "orbit_type": orbit_type or "n/d",
+            "date_found": datetime.utcnow().strftime("%Y-%m-%d")
+        }
     except Exception as e:
-        print(f"⚠️ Errore su {url}: {e}")
-    return None
+        print(f"⚠️ Errore parsing {url}: {e}")
+        return None
 
+def build_table(data_dict):
+    """Genera una tabella Markdown con tutti i NEO trovati."""
+    header = "| Designazione | Data | Magnitudo H | MOID | Tipo Orbita | Link MPEC |\n"
+    header += "|--------------|------|-------------|------|--------------|-----------|\n"
+    rows = []
+    for k, d in sorted(data_dict.items()):
+        rows.append(
+            f"| {d['designation']} | {d['date_found']} | {d['h_mag']} | {d['moid']} | {d['orbit_type']} | [Apri]({d['url']}) |"
+        )
+    return header + "\n".join(rows)
 
-def load_archive():
-    """Carica l’archivio locale JSON"""
-    if os.path.exists(ARCHIVE_FILE):
-        with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+def send_to_discord(message, title="🪐 Aggiornamento archivio MPEC"):
+    if not DISCORD_WEBHOOK:
+        print("❌ Nessun webhook Discord trovato.")
+        return
+    payload = {
+        "username": "MPC Bot",
+        "embeds": [{
+            "title": title,
+            "description": message,
+            "color": 10181046
+        }]
+    }
+    try:
+        r = requests.post(DISCORD_WEBHOOK, json=payload)
+        print(f"✅ Inviato su Discord ({r.status_code})")
+    except Exception as e:
+        print("⚠️ Errore invio Discord:", e)
 
-
-def save_archive(data):
-    """Salva l’archivio e aggiorna la tabella Markdown"""
-    with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-    with open(TABLE_FILE, "w", encoding="utf-8") as f:
-        f.write("| # | Titolo | Link |\n")
-        f.write("|---|---------|------|\n")
-        for i, entry in enumerate(data, 1):
-            f.write(f"| {i} | {entry['title']} | [Apri]({entry['url']}) |\n")
-
-    print(f"✅ Archivio salvato ({len(data)} voci totali).")
-
-
-def main():
-    archive = load_archive()
-    known_urls = {item["url"] for item in archive}
-    new_entries = []
+# ==========================
+# MAIN
+# ==========================
+if __name__ == "__main__":
+    cache = load_cache()
+    new_entries = {}
 
     for year in YEARS:
-        links = fetch_mpec_links(year)
+        links = fetch_mpec_list(year)
         for link in links:
-            if link in known_urls:
+            if link in cache:
                 continue
-            entry = fetch_mpec_data(link)
-            if entry:
-                print(f"🛰️ Nuova MPEC trovata: {entry['title']}")
-                new_entries.append(entry)
+            parsed = parse_mpec_page(link)
+            if parsed:
+                cache[link] = parsed
+                new_entries[link] = parsed
+
+    save_cache(cache)
 
     if new_entries:
-        archive.extend(new_entries)
-        save_archive(archive)
-        print(f"✨ Aggiunte {len(new_entries)} nuove MPEC con codice {OBSERVATORY_CODE}.")
+        print(f"🆕 Trovate {len(new_entries)} nuove MPEC con codice {OBSERVATORY_CODE}")
+        msg = "\n".join(
+            [f"🔭 **{v['designation']}** – {v['orbit_type']}  (H={v['h_mag']}, MOID={v['moid']})\n🔗 {v['url']}" for v in new_entries.values()]
+        )
+        send_to_discord(msg, "🆕 Nuove MPEC rilevate!")
     else:
         print("ℹ️ Nessuna nuova MPEC trovata.")
 
-
-if __name__ == "__main__":
-    main()
+    # Aggiorna tabella
+    table = build_table(cache)
+    with open(TABLE_FILE, "w", encoding="utf-8") as f:
+        f.write(table)
+    print("📄 Tabella aggiornata salvata in", TABLE_FILE)
