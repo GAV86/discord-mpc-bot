@@ -18,7 +18,6 @@ OBSERVATORY_CODE = "I52"
 OBSERVATORY_NAME = "Steward Observatory, Mt. Lemmon Station"
 # ----------------------------------------
 
-# Parole da escludere (non NEO)
 EXCLUDED_KEYWORDS = [
     "COMET", "SATELLITE", "DAILY ORBIT UPDATE", "EDITORIAL",
     "CIRCULAR", "RETRACTION", "EPHEMERIS", "CORRIGENDA"
@@ -92,7 +91,7 @@ def fetch_recent_mpecs():
 
 
 def fetch_mpec_details(url):
-    """Scarica e analizza una singola MPEC (solo se contiene D65 in 'Observer details')"""
+    """Scarica e analizza una singola MPEC (solo se contiene il codice dell’osservatorio)"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -102,7 +101,7 @@ def fetch_mpec_details(url):
 
     text = r.text
 
-    # cerca la sezione 'Observer details'
+    # Cerca la sezione 'Observer details'
     obs_block = re.search(r"Observer details:(.*?)(Orbital elements|Ephemeris|Residuals|M\. P\. C\.|$)", text, re.S | re.I)
     if not obs_block or OBSERVATORY_CODE not in obs_block.group(1):
         return None
@@ -116,14 +115,29 @@ def fetch_mpec_details(url):
     orb_section = re.search(r"Orbital elements.*?(?:(Residuals|Ephemeris|M\. P\. C\.|$))", text, re.S | re.I)
     if orb_section:
         orb = orb_section.group(0).replace("\r", " ")
-        H = re.search(r"\bH\s*=?\s*([\d.]+)", orb)
-        e = re.search(r"\be\s*=?\s*([\d.]+)", orb)
-        i = re.search(r"Incl\.\s*([\d.]+)", orb)
-        moid = re.search(r"MOID\s*=?\s*([\d.]+)", orb)
-        if H: data["H"] = float(H.group(1))
-        if e: data["e"] = float(e.group(1))
-        if i: data["i"] = float(i.group(1))
-        if moid: data["MOID"] = float(moid.group(1))
+
+        def safe_float(match, label):
+            if not match:
+                return None
+            val = match.group(1).strip()
+            if val in [".", "", "-", "—"]:
+                print(f"⚠️ Valore {label} non valido ('{val}') in {url}")
+                return None
+            try:
+                return float(val)
+            except ValueError:
+                print(f"⚠️ Conversione {label} fallita ('{val}') in {url}")
+                return None
+
+        H = safe_float(re.search(r"\bH\s*=?\s*([\d.]+)", orb), "H")
+        e = safe_float(re.search(r"\be\s*=?\s*([\d.]+)", orb), "e")
+        i = safe_float(re.search(r"Incl\.\s*([\d.]+)", orb), "i")
+        moid = safe_float(re.search(r"MOID\s*=?\s*([\d.]+)", orb), "MOID")
+
+        if H is not None: data["H"] = H
+        if e is not None: data["e"] = e
+        if i is not None: data["i"] = i
+        if moid is not None: data["MOID"] = moid
 
     issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
     if issued:
@@ -207,7 +221,7 @@ def main():
         generate_table(all_data)
         print(f"📈 Archivio aggiornato: {len(all_data)} voci totali.")
     else:
-        print("ℹ️ Nessuna nuova MPEC trovata per D65.")
+        print(f"ℹ️ Nessuna nuova MPEC trovata per {OBSERVATORY_CODE}.")
         generate_table(existing)
 
     send_to_discord(TABLE_FILE)
