@@ -5,26 +5,24 @@ import os
 from datetime import datetime
 
 # ---------------- CONFIG ----------------
-YEAR = 2025
-OBS_CODE = "D65"  # codice osservatorio
-BASE_URL = f"https://www.minorplanetcenter.net/mpec/{YEAR}/"
-ARCHIVE_FILE = "archive.json"
+YEARS = [2024, 2025]          # 🔁 Anni da scansionare
+OBS_CODE = "D65"              # 🔭 Codice osservatorio
+ARCHIVE_FILE = "archive.json" # Archivio cumulativo
 # ----------------------------------------
 
-def fetch_mpec_links():
-    """Scarica la lista di tutte le MPEC dell'anno."""
-    index_url = BASE_URL
-    r = requests.get(index_url)
+def fetch_mpec_links(base_url, year):
+    """Scarica la lista di tutte le MPEC per l'anno indicato."""
+    r = requests.get(base_url)
     if r.status_code != 200:
-        print(f"❌ Errore caricando {index_url}: {r.status_code}")
+        print(f"❌ Errore caricando {base_url}: {r.status_code}")
         return []
     soup = BeautifulSoup(r.text, "html.parser")
     links = [
-        BASE_URL + a["href"]
+        base_url + a["href"]
         for a in soup.find_all("a", href=True)
         if a["href"].endswith(".html")
     ]
-    print(f"🔗 Trovate {len(links)} MPEC nel {YEAR}")
+    print(f"🔗 Trovate {len(links)} MPEC nel {year}")
     return links
 
 def load_archive():
@@ -37,7 +35,7 @@ def save_archive(data):
     with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-def parse_mpec_page(url):
+def parse_mpec_page(url, year):
     """Legge una singola MPEC e verifica se contiene l'osservatorio."""
     try:
         r = requests.get(url, timeout=10)
@@ -55,6 +53,7 @@ def parse_mpec_page(url):
         return {
             "url": url,
             "title": title,
+            "year": year,
             "date": date or "Data non trovata",
         }
     except Exception as e:
@@ -64,11 +63,11 @@ def parse_mpec_page(url):
 def generate_table(entries):
     """Crea una tabella Markdown per Discord."""
     lines = [
-        "| 📄 MPEC | 📅 Data | 🔗 Link |",
-        "|:--------|:--------|:--------|",
+        "| 📄 MPEC | 📅 Data | 🗓️ Anno | 🔗 Link |",
+        "|:--------|:--------|:--------|:--------|",
     ]
-    for e in sorted(entries, key=lambda x: x["url"], reverse=True):
-        lines.append(f"| {e['title']} | {e['date']} | [Apri]({e['url']}) |")
+    for e in sorted(entries, key=lambda x: (x["year"], x["url"]), reverse=True):
+        lines.append(f"| {e['title']} | {e['date']} | {e['year']} | [Apri]({e['url']}) |")
     return "\n".join(lines)
 
 def main():
@@ -76,16 +75,20 @@ def main():
     known_urls = {a["url"] for a in archive}
     print(f"📚 Archivio iniziale: {len(archive)} voci")
 
-    links = fetch_mpec_links()
     new_entries = []
-    for url in links:
-        if url in known_urls:
-            continue
-        entry = parse_mpec_page(url)
-        if entry:
-            print(f"✅ Nuova MPEC trovata: {entry['title']}")
-            new_entries.append(entry)
-            archive.append(entry)
+
+    for year in YEARS:
+        base_url = f"https://www.minorplanetcenter.net/mpec/{year}/"
+        print(f"\n📆 Scansione MPEC {year}...")
+        links = fetch_mpec_links(base_url, year)
+        for url in links:
+            if url in known_urls:
+                continue
+            entry = parse_mpec_page(url, year)
+            if entry:
+                print(f"✅ Nuova MPEC trovata ({year}): {entry['title']}")
+                new_entries.append(entry)
+                archive.append(entry)
 
     if new_entries:
         save_archive(archive)
