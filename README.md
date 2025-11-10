@@ -23,9 +23,6 @@ Copia codice
 🔗 https://www.minorplanetcenter.net/mpec/K25/K25A10.html
 🔗 https://www.minorplanetcenter.net/mpec/K25/K25A11.html
 
-yaml
-Copia codice
-
 ---
 
 ## ✅ DOPO IL SETUP
