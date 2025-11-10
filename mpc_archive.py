@@ -91,7 +91,7 @@ def fetch_recent_mpecs():
 
 
 def fetch_mpec_details(url):
-    """Scarica e analizza una singola MPEC (solo se contiene il codice dell’osservatorio)"""
+    """Scarica e analizza una singola MPEC: orbita completa + osservazioni D65"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -100,53 +100,65 @@ def fetch_mpec_details(url):
         return None
 
     text = r.text
-
-    # Cerca la sezione 'Observer details'
-    obs_block = re.search(r"Observer details:(.*?)(Orbital elements|Ephemeris|Residuals|M\. P\. C\.|$)", text, re.S | re.I)
-    if not obs_block or OBSERVATORY_CODE not in obs_block.group(1):
-        return None
+    clean = re.sub(r"\s+", " ", text)
 
     data = {"url": url}
 
-    obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", text)
+    # --- 🔭 Oggetto principale ---
+    obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", clean)
     if obj_match:
         data["object"] = obj_match.group(1).strip()
 
-    orb_section = re.search(r"Orbital elements.*?(?:(Residuals|Ephemeris|M\. P\. C\.|$))", text, re.S | re.I)
-    if orb_section:
-        orb = orb_section.group(0).replace("\r", " ")
-
-        def safe_float(match, label):
-            if not match:
-                return None
-            val = match.group(1).strip()
-            if val in [".", "", "-", "—"]:
-                print(f"⚠️ Valore {label} non valido ('{val}') in {url}")
-                return None
-            try:
-                return float(val)
-            except ValueError:
-                print(f"⚠️ Conversione {label} fallita ('{val}') in {url}")
-                return None
-
-        H = safe_float(re.search(r"\bH\s*=?\s*([\d.]+)", orb), "H")
-        e = safe_float(re.search(r"\be\s*=?\s*([\d.]+)", orb), "e")
-        i = safe_float(re.search(r"Incl\.\s*([\d.]+)", orb), "i")
-        moid = safe_float(re.search(r"MOID\s*=?\s*([\d.]+)", orb), "MOID")
-
-        if H is not None: data["H"] = H
-        if e is not None: data["e"] = e
-        if i is not None: data["i"] = i
-        if moid is not None: data["MOID"] = moid
-
+    # --- 📅 Data emissione ---
     issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
     if issued:
         data["issued"] = issued.group(1)
 
-    data["observers"] = [OBSERVATORY_CODE]
-    title = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
-    if title:
-        data["mpec_code"] = title.group(1)
+    # --- 🪐 Parametri orbitali completi ---
+    orb = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
+    if orb:
+        block = orb.group(1).replace("\r", " ")
+        fields = {
+            "a": r"\ba\s*=?\s*([\d.]+)",
+            "e": r"\be\s*=?\s*([\d.]+)",
+            "i": r"Incl\.\s*([\d.]+)",
+            "Omega": r"Node\s*([\d.]+)",
+            "omega": r"Peri\.\s*([\d.]+)",
+            "q": r"\bq\s*=?\s*([\d.]+)",
+            "P": r"\bP\s*=?\s*([\d.]+)",
+            "H": r"\bH\s*=?\s*([\d.]+)",
+            "G": r"\bG\s*=?\s*([\d.]+)",
+            "U": r"\bU\s*=?\s*([\d.]+)",
+            "MOID": r"MOID\s*=?\s*([\d.]+)"
+        }
+        for key, pattern in fields.items():
+            m = re.search(pattern, block)
+            if m:
+                try:
+                    data[key] = float(m.group(1))
+                except ValueError:
+                    data[key] = m.group(1)
+
+    # --- 🧭 Osservazioni del tuo osservatorio (es. D65) ---
+    obs_code = OBSERVATORY_CODE
+    obs_pattern = re.compile(rf"^.*{obs_code}.*$", re.M)
+    obs_lines = obs_pattern.findall(text)
+    if obs_lines:
+        data["observations"] = [line.strip() for line in obs_lines]
+
+    # --- 🔬 Dettagli dell’osservatorio nel blocco finale ---
+    obs_details = re.search(
+        rf"{obs_code}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)",
+        text, re.S | re.I
+    )
+    if obs_details:
+        data["observatory_details"] = obs_details.group(1).strip()
+
+    # --- 📄 Codice MPEC ---
+    code_match = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
+    if code_match:
+        data["mpec_code"] = code_match.group(1)
+
     return data
 
 
