@@ -11,21 +11,17 @@ BASE_URL = "https://www.minorplanetcenter.net/mpec/"
 ARCHIVE_FILE = "mpc_data.json"
 TABLE_FILE = "mpc_table.md"
 MESSAGE_ID_FILE = "discord_message_id.txt"
+OBSERVATORY_CODE = "D65"  # 🔭 codice del tuo osservatorio
+OBSERVATORY_NAME = "Osservatorio Astronomico “G. Beltrame”"
 # ----------------------------------------
 
-# ⚠️ Filtri per saltare MPEC non rilevanti (solo NEO e asteroidi)
 EXCLUDED_KEYWORDS = [
     "COMET", "SATELLITE", "DAILY ORBIT UPDATE", "EDITORIAL", "CIRCULAR",
     "RETRACTION", "EPHEMERIS", "CORRIGENDA"
 ]
 
-# 🔭 Nome ufficiale dell’osservatorio
-OBSERVATORY_NAME = "Osservatorio Astronomico “G. Beltrame”"
-
 
 # 🛰️ ————————————————————————————————————————————————————————————————
-# Funzione per inviare o aggiornare il messaggio su Discord
-# ————————————————————————————————————————————————————————————————
 def send_to_discord(file_path):
     """Aggiorna o invia la tabella su Discord, mantenendo lo stesso messaggio"""
     webhook_url = os.getenv("DISCORD_WEBHOOK")
@@ -39,13 +35,11 @@ def send_to_discord(file_path):
     if len(content) > 1900:
         content = content[:1900] + "\n*(troncato per lunghezza Discord)*"
 
-    # Controlla se esiste un ID messaggio salvato
     message_id = None
     if os.path.exists(MESSAGE_ID_FILE):
         with open(MESSAGE_ID_FILE, "r") as f:
             message_id = f.read().strip()
 
-    # Se esiste un messaggio precedente → PATCH per aggiornarlo
     if message_id:
         patch_url = webhook_url + f"/messages/{message_id}"
         response = requests.patch(
@@ -60,7 +54,6 @@ def send_to_discord(file_path):
         else:
             print(f"⚠️ Errore aggiornamento messaggio ({response.status_code}), ne invio uno nuovo...")
 
-    # Se non esiste o fallisce → crea nuovo messaggio
     response = requests.post(webhook_url, json={"content": content}, headers={"Content-Type": "application/json"})
     if response.status_code in (200, 204):
         data = response.json() if response.text else {}
@@ -76,8 +69,6 @@ def send_to_discord(file_path):
 
 
 # 🪐 ————————————————————————————————————————————————————————————————
-# Funzioni MPC
-# ————————————————————————————————————————————————————————————————
 def fetch_recent_mpecs():
     """Scarica la pagina RecentMPECs e restituisce la lista delle MPEC più recenti"""
     r = requests.get(MPC_RECENT_URL)
@@ -90,20 +81,12 @@ def fetch_recent_mpecs():
 
     mpecs = []
     for code, title in found:
-        # Filtra solo le MPEC con oggetto asteroidale o NEO
         if any(bad in title.upper() for bad in EXCLUDED_KEYWORDS):
             continue
-
         year = code.split("-")[0]
         short = "K" + year[-2:]  # esempio: 2025 → K25
         link = f"{BASE_URL}{short}/{short}{code[-3:]}.html"
-
-        mpecs.append({
-            "code": code,
-            "title": title.strip(),
-            "url": link
-        })
-
+        mpecs.append({"code": code, "title": title.strip(), "url": link})
     return mpecs
 
 
@@ -118,6 +101,11 @@ def fetch_mpec_details(url):
         return None
 
     text = r.text
+
+    # Filtra solo se contiene il codice osservatorio
+    if OBSERVATORY_CODE not in text:
+        return None
+
     clean = re.sub(r"\s+", " ", text)
     data = {}
 
@@ -126,40 +114,34 @@ def fetch_mpec_details(url):
     if obj_match:
         data["object"] = obj_match.group(1)
 
-    # Magnitudine assoluta H
-    H_match = re.search(r"H\s+(\d+\.\d+)", clean)
-    if H_match:
-        data["H"] = float(H_match.group(1))
+    # Estrai solo la sezione “Orbital elements”
+    orb_match = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
+    if orb_match:
+        orb_text = orb_match.group(1)
+        H = re.search(r"H\s+([\d.]+)", orb_text)
+        e = re.search(r"e\s+([\d.]+)", orb_text)
+        i = re.search(r"Incl\.\s+([\d.]+)", orb_text)
+        moid = re.search(r"MOID\s*=\s*([\d.]+)", orb_text)
 
-    # Eccentricità
-    e_match = re.search(r"e\s+(\d+\.\d+)", clean)
-    if e_match:
-        data["e"] = float(e_match.group(1))
-
-    # Inclinazione
-    i_match = re.search(r"Incl\.\s+(\d+\.\d+)", clean)
-    if i_match:
-        data["i"] = float(i_match.group(1))
-
-    # MOID
-    moid_match = re.search(r"MOID\s*=\s*([0-9.]+)\s*AU", clean)
-    if moid_match:
-        data["MOID"] = float(moid_match.group(1))
-
-    # Osservatori
-    obs_match = re.findall(r"[A-Z]\d{2,3}\s+([A-Z][A-Za-z .'-]+)", text)
-    if obs_match:
-        data["observers"] = list(set(o.strip() for o in obs_match))
-
-    # Codice MPEC
-    title = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", clean)
-    if title:
-        data["mpec_code"] = title.group(1)
+        if H: data["H"] = float(H.group(1))
+        if e: data["e"] = float(e.group(1))
+        if i: data["i"] = float(i.group(1))
+        if moid: data["MOID"] = float(moid.group(1))
 
     # Data emissione
-    epoch = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", clean)
-    if epoch:
-        data["issued"] = epoch.group(1)
+    issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
+    if issued:
+        data["issued"] = issued.group(1)
+
+    # Osservatori unici (codice + nome)
+    obs_lines = re.findall(rf"({OBSERVATORY_CODE})\s+([A-Z][A-Za-z ,.'\-]+)", text)
+    observers = [f"{c} {n.strip()}" for c, n in obs_lines]
+    if observers:
+        data["observers"] = observers
+
+    title = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
+    if title:
+        data["mpec_code"] = title.group(1)
 
     data["url"] = url
     return data
@@ -183,11 +165,11 @@ def generate_table(data):
     total = len(data)
 
     header = [
-        f"**📅 Archivio MPEC aggiornato al {now}**",
-        f"Totale MPEC NEO registrate: **{total}**",
+        f"**📅 Archivio MPEC (solo {OBSERVATORY_NAME}) aggiornato al {now}**",
+        f"Totale MPEC con codice {OBSERVATORY_CODE}: **{total}**",
         "",
-        "| MPEC | Oggetto | H | e | i (°) | MOID (AU) | Scopritori | Data |",
-        "|------|----------|---|---|-------|------------|-------------|------|"
+        "| MPEC | Oggetto | H | e | i (°) | MOID (AU) | Data |",
+        "|------|----------|---|---|-------|------------|------|"
     ]
 
     lines = []
@@ -197,7 +179,6 @@ def generate_table(data):
             f"| {d.get('object','?')} "
             f"| {d.get('H','?')} | {d.get('e','?')} "
             f"| {d.get('i','?')} | {d.get('MOID','?')} "
-            f"| {', '.join(d.get('observers', [])[:3])} "
             f"| {d.get('issued','?')} |"
         )
 
@@ -239,10 +220,9 @@ def main():
         generate_table(all_data)
         print(f"📈 Archivio aggiornato: {len(all_data)} voci totali.")
     else:
-        print("ℹ️ Nessuna nuova MPEC trovata.")
+        print("ℹ️ Nessuna nuova MPEC trovata per D65.")
         generate_table(existing)
 
-    # ✅ Invia o aggiorna il messaggio su Discord
     send_to_discord(TABLE_FILE)
 
 
