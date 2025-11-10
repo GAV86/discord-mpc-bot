@@ -185,21 +185,32 @@ def send_to_discord(data):
             "> ─────────────────────────"
         ]
 
-        # ✅ Osservazioni tabellari
+        # ✅ Osservazioni formattate tipo tabella (colonne allineate)
         if d.get("observations"):
-            header = "CODICE       DATA(UTC)        RA(J2000)       DEC(J2000)      MAG   COD"
+            header = f"{'CODICE':<8} {'DATA(UTC)':<12} {'RA(J2000)':<12} {'DEC(J2000)':<12} {'MAG':<5} {'COD':<10}"
             formatted = []
             for line in d["observations"]:
                 line = re.sub(r"\s+", " ", line.strip())
                 parts = re.split(r"\s+", line)
-                if len(parts) >= 9:
-                    formatted.append(
-                        f"{parts[0]:<10} {parts[2]} {parts[3]} {parts[4]} {parts[5]} {parts[-2]:>5} {parts[-1]}"
-                    )
+                if len(parts) >= 10:
+                    code = parts[0]
+                    date = f"{parts[2]}-{parts[3]}"
+                    ra = f"{parts[4]} {parts[5]} {parts[6]}"
+                    dec = f"{parts[7]} {parts[8]}"
+                    mag = parts[9] if re.match(r"^\d", parts[9]) else "—"
+                    cod = parts[-1]
+                    formatted.append(f"{code:<8} {date:<12} {ra:<12} {dec:<12} {mag:<5} {cod:<10}")
                 else:
                     formatted.append(line)
-            desc.append(f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n```text\n{header}\n" +
-                        "\n".join(formatted) + "\n```")
+
+            desc.append(
+                f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n"
+                + "```text\n"
+                + header + "\n"
+                + "\n".join(formatted)
+                + "\n```\n"
+                + "_🧭 RA: Ascensione Retta • DEC: Declinazione • MAG: Magnitudine • COD: Codice osservazione MPC_"
+            )
 
         # ✅ Strumento completo
         if d.get("observatory_details"):
@@ -212,6 +223,7 @@ def send_to_discord(data):
             "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
         })
 
+    # 🪐 Messaggio principale
     header = (
         f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
         f"Aggiornato al **{now}**\n"
