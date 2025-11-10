@@ -12,6 +12,12 @@ TABLE_FILE = "mpc_table.md"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 # ----------------------------------------
 
+# ⚠️ Filtri per saltare MPEC non rilevanti (solo NEO e asteroidi)
+EXCLUDED_KEYWORDS = [
+    "COMET", "SATELLITE", "DAILY ORBIT UPDATE", "EDITORIAL", "CIRCULAR",
+    "RETRACTION", "EPHEMERIS", "CORRIGENDA"
+]
+
 def fetch_recent_mpecs():
     """Scarica la pagina RecentMPECs e restituisce la lista delle MPEC più recenti"""
     r = requests.get(MPC_RECENT_URL)
@@ -19,16 +25,22 @@ def fetch_recent_mpecs():
     soup = BeautifulSoup(r.text, "html.parser")
     text = soup.get_text("\n", strip=True)
 
-    pattern = re.compile(r"MPEC\s+(20\d{2}-[A-Z]\d{2,3})")
+    pattern = re.compile(r"MPEC\s+(20\d{2}-[A-Z]\d{2,3})\s+\((.*?)\)", re.IGNORECASE)
     found = pattern.findall(text)
 
     mpecs = []
-    for code in found:
+    for code, title in found:
+        # Filtra solo le MPEC con oggetto asteroidale o NEO
+        if any(bad in title.upper() for bad in EXCLUDED_KEYWORDS):
+            continue
+
         year = code.split("-")[0]
-        short = "K" + year[-2:]  # K25 per 2025
+        short = "K" + year[-2:]  # esempio: 2025 → K25
         link = f"{BASE_URL}{short}/{short}{code[-3:]}.html"
+
         mpecs.append({
             "code": code,
+            "title": title.strip(),
             "url": link
         })
 
@@ -36,9 +48,12 @@ def fetch_recent_mpecs():
 
 def fetch_mpec_details(url):
     """Scarica e analizza una singola MPEC"""
-    r = requests.get(url)
+    try:
+        r = requests.get(url, timeout=10)
+    except requests.RequestException:
+        return None
+
     if r.status_code != 200:
-        print(f"⚠️ Errore {r.status_code} per {url}")
         return None
 
     text = r.text
@@ -70,17 +85,17 @@ def fetch_mpec_details(url):
     if moid_match:
         data["MOID"] = float(moid_match.group(1))
 
-    # Osservatori
-    obs_match = re.findall(r"([A-Z]\d{2,3})\s+([A-Z][A-Za-z .'-]+)", text)
+    # Osservatori (lista unica)
+    obs_match = re.findall(r"[A-Z]\d{2,3}\s+([A-Z][A-Za-z .'-]+)", text)
     if obs_match:
-        data["observers"] = list(set(o[1].strip() for o in obs_match))
+        data["observers"] = list(set(o.strip() for o in obs_match))
 
-    # Titolo / intestazione
+    # Codice MPEC
     title = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", clean)
     if title:
         data["mpec_code"] = title.group(1)
 
-    # Epoch (data)
+    # Data emissione
     epoch = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", clean)
     if epoch:
         data["issued"] = epoch.group(1)
@@ -124,7 +139,7 @@ def main():
     new_data = []
 
     mpecs = fetch_recent_mpecs()
-    print(f"🔍 Trovate {len(mpecs)} MPEC nella pagina recente.")
+    print(f"🔍 Trovate {len(mpecs)} MPEC rilevanti (asteroidi / NEO).")
 
     for m in mpecs:
         code = m["code"]
