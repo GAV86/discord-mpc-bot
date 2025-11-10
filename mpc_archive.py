@@ -11,11 +11,13 @@ BASE_URL = "https://www.minorplanetcenter.net/mpec/"
 ARCHIVE_FILE = "mpc_data.json"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
-# 🔭 Codice e nome dell’osservatorio
+# 🔭 Codice e nome dell’osservatorio (attivo)
 OBSERVATORY_CODE = "L47"
 OBSERVATORY_NAME = "Osservatorio Astronomico, Piobbico"
-#BSERVATORY_CODE = "D65"//
-#OBSERVATORY_NAME = "Osservatorio Astronomico G. Beltrame"//
+
+# 👇 Se vuoi cambiare osservatorio, basta commentare/scommentare:
+# OBSERVATORY_CODE = "D65"
+# OBSERVATORY_NAME = "Osservatorio Astronomico G. Beltrame"
 # ----------------------------------------
 
 EXCLUDED_KEYWORDS = [
@@ -23,8 +25,10 @@ EXCLUDED_KEYWORDS = [
     "CIRCULAR", "RETRACTION", "EPHEMERIS", "CORRIGENDA"
 ]
 
-# --------------- UTILS -----------------
+
+# ---------------- FUNZIONI ----------------
 def fetch_recent_mpecs():
+    """Scarica la pagina RecentMPECs e restituisce l'elenco delle MPEC rilevanti"""
     r = requests.get(MPC_RECENT_URL, timeout=15)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
@@ -44,6 +48,7 @@ def fetch_recent_mpecs():
 
 
 def fetch_mpec_details(url):
+    """Estrae i dati di una singola MPEC solo se contiene il codice osservatorio"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -64,9 +69,11 @@ def fetch_mpec_details(url):
     orb_section = re.search(r"Orbital elements.*?(?:(Residuals|Ephemeris|M\. P\. C\.|$))", text, re.S | re.I)
     if orb_section:
         orb = orb_section.group(0).replace("\r", " ")
+
         def f(rgx):
             m = re.search(rgx, orb)
             return m.group(1).strip() if m else "?"
+
         data["H"] = f(r"\bH\s*=?\s*([\d.]+)")
         data["e"] = f(r"\be\s*=?\s*([\d.]+)")
         data["i"] = f(r"Incl\.\s*([\d.]+)")
@@ -76,15 +83,18 @@ def fetch_mpec_details(url):
     if issued:
         data["issued"] = issued.group(1)
 
+    # Estrai le linee di osservazione specifiche dell’osservatorio
     obs_lines = []
     for line in text.splitlines():
         if OBSERVATORY_CODE in line and re.search(r"\d{4}\s+[A-Z]{1,2}\d{0,3}", line) is None:
             clean = re.sub(r"\s+", " ", line.strip())
             obs_lines.append(clean)
     data["observations"] = obs_lines
+
     mpec_code = re.search(r"MPEC\s*(\d{4}-[A-Z]\d{2,3})", text)
     if mpec_code:
         data["mpec_code"] = mpec_code.group(1)
+
     return data
 
 
@@ -107,7 +117,7 @@ def send_embeds_to_discord(main_embed, embeds):
         print("❌ Errore: variabile DISCORD_WEBHOOK non trovata.")
         return
 
-    payload = {"embeds": [main_embed] + embeds[:9]}  # max 10 embed
+    payload = {"embeds": [main_embed] + embeds[:9]}  # massimo 10 embed per messaggio
     r = requests.post(DISCORD_WEBHOOK, json=payload)
     if r.status_code in (200, 204):
         print("✅ Messaggio Discord inviato con successo.")
@@ -116,8 +126,10 @@ def send_embeds_to_discord(main_embed, embeds):
 
 
 def build_embeds(data):
+    """Costruisce l'embed principale e quelli individuali"""
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     total = len(data)
+
     if total == 0:
         return [], {
             "title": f"🪐 Archivio MPEC ({OBSERVATORY_NAME})",
@@ -125,13 +137,20 @@ def build_embeds(data):
             "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
         }
 
-    # STATISTICHE
-    moid_values = [float(d["MOID"]) for d in data if d.get("MOID", "?") not in ("?", "")] or [0]
-    h_values = [float(d["H"]) for d in data if d.get("H", "?") not in ("?", "")]
+    # Helper per convertire numeri in sicurezza
+    def safe_float(val):
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    moid_values = [safe_float(d.get("MOID")) for d in data if safe_float(d.get("MOID")) is not None]
+    h_values = [safe_float(d.get("H")) for d in data if safe_float(d.get("H")) is not None]
+
     stats = {
         "moid_lt_0_05": sum(1 for m in moid_values if m < 0.05),
         "moid_lt_0_01": sum(1 for m in moid_values if m < 0.01),
-        "h_avg": round(sum(h_values) / len(h_values), 2) if h_values else 0.0
+        "h_avg": round(sum(h_values) / len(h_values), 2) if h_values else 0.0,
     }
 
     main_embed = {
