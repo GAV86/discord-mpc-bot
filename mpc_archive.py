@@ -44,7 +44,7 @@ def fetch_recent_mpecs():
 
 
 def fetch_mpec_details(url):
-    """Scarica e analizza una singola MPEC: orbita + osservazioni D65"""
+    """Scarica e analizza una singola MPEC: orbita + osservazioni del tuo osservatorio (solo se D65 è accreditato ufficialmente)"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -53,20 +53,25 @@ def fetch_mpec_details(url):
         return None
 
     text = r.text
-    clean = re.sub(r"\s+", " ", text)
     data = {"url": url}
 
+    # ✅ Verifica che il tuo osservatorio compaia nella sezione "Observer details"
+    obs_block = re.search(r"Observer details:(.*?)(Orbital elements|Ephemeris|Residuals|M\. P\. C\.|$)", text, re.S | re.I)
+    if not obs_block or OBSERVATORY_CODE not in obs_block.group(1):
+        # Esclude MPEC che non menzionano l'osservatorio nei dettagli ufficiali
+        return None
+
     # Oggetto
-    obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", clean)
+    obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", text)
     if obj_match:
         data["object"] = obj_match.group(1).strip()
 
-    # Data emissione
+    # Data di emissione
     issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
     if issued:
         data["issued"] = issued.group(1)
 
-    # Parametri orbitali
+    # Parametri orbitali principali
     orb = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
     if orb:
         block = orb.group(1).replace("\r", " ")
@@ -89,13 +94,13 @@ def fetch_mpec_details(url):
                 except ValueError:
                     data[key] = m.group(1)
 
-    # Osservazioni del tuo osservatorio
+    # Estrarre solo le osservazioni realmente associate al codice D65
     obs_pattern = re.compile(rf"^.*{OBSERVATORY_CODE}.*$", re.M)
     obs_lines = obs_pattern.findall(text)
     if obs_lines:
         data["observations"] = [line.strip() for line in obs_lines]
 
-    # Dettagli strumenti
+    # Estrarre la descrizione dello strumento usato (solo se menzionato nel blocco)
     obs_details = re.search(
         rf"{OBSERVATORY_CODE}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)",
         text, re.S | re.I
