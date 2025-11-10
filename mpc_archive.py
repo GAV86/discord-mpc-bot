@@ -91,7 +91,7 @@ def fetch_recent_mpecs():
 
 
 def fetch_mpec_details(url):
-    """Scarica e analizza una singola MPEC"""
+    """Scarica e analizza una singola MPEC (solo se contiene il codice osservatorio)"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -106,46 +106,51 @@ def fetch_mpec_details(url):
     if OBSERVATORY_CODE not in text:
         return None
 
-    clean = re.sub(r"\s+", " ", text)
-    data = {}
+    data = {"url": url}
 
-    # Oggetto principale
-    obj_match = re.search(r"([12]\d{3}\s+[A-Z]{1,2}\d{0,3})", clean)
+    # 🪐 Oggetto principale (es. "2025 VQ", "2025 N")
+    obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", text)
     if obj_match:
-        data["object"] = obj_match.group(1)
+        data["object"] = obj_match.group(1).strip()
 
-    # Estrai solo la sezione “Orbital elements”
-    orb_match = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
-    if orb_match:
-        orb_text = orb_match.group(1)
-        H = re.search(r"H\s+([\d.]+)", orb_text)
-        e = re.search(r"e\s+([\d.]+)", orb_text)
-        i = re.search(r"Incl\.\s+([\d.]+)", orb_text)
-        moid = re.search(r"MOID\s*=\s*([\d.]+)", orb_text)
+    # 🧮 Sezione "Orbital elements"
+    orb_section = re.search(r"Orbital elements(?:.*?)\n(.*?)\n\n", text, re.S | re.I)
+    if orb_section:
+        orb = orb_section.group(1).replace("\r", " ")
+        # magnitudine H
+        H = re.search(r"H\s*=\s*([\d.]+)", orb) or re.search(r"H\s+([\d.]+)", orb)
+        if H:
+            data["H"] = float(H.group(1))
+        # eccentricità
+        e = re.search(r"\be\s*=\s*([\d.]+)", orb) or re.search(r"\be\s+([\d.]+)", orb)
+        if e:
+            data["e"] = float(e.group(1))
+        # inclinazione
+        i = re.search(r"Incl\.\s*([\d.]+)", orb)
+        if i:
+            data["i"] = float(i.group(1))
+        # MOID
+        moid = re.search(r"MOID\s*=\s*([\d.]+)", orb)
+        if moid:
+            data["MOID"] = float(moid.group(1))
 
-        if H: data["H"] = float(H.group(1))
-        if e: data["e"] = float(e.group(1))
-        if i: data["i"] = float(i.group(1))
-        if moid: data["MOID"] = float(moid.group(1))
-
-    # Data emissione
+    # 📅 Data di emissione
     issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
     if issued:
         data["issued"] = issued.group(1)
 
-    # Osservatori unici (codice + nome)
+    # 👁️ Osservatori D65
     obs_lines = re.findall(rf"({OBSERVATORY_CODE})\s+([A-Z][A-Za-z ,.'\-]+)", text)
     observers = [f"{c} {n.strip()}" for c, n in obs_lines]
     if observers:
         data["observers"] = observers
 
+    # Codice MPEC
     title = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
     if title:
         data["mpec_code"] = title.group(1)
 
-    data["url"] = url
     return data
-
 
 def load_existing_data():
     if not os.path.exists(ARCHIVE_FILE):
