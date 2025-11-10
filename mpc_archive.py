@@ -163,12 +163,13 @@ def save_data(data):
 
 
 def generate_table(data):
-    """Crea una versione compatta e leggibile per Discord"""
+    """Crea una versione formattata e spiegata per Discord"""
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     total = len(data)
 
     lines = [
-        f"**📅 Archivio MPEC (solo {OBSERVATORY_NAME}) aggiornato al {now}**",
+        f"🪐 **Archivio MPEC ({OBSERVATORY_NAME})**",
+        f"Aggiornato al {now}",
         f"Totale MPEC con codice {OBSERVATORY_CODE}: **{total}**",
         ""
     ]
@@ -177,18 +178,34 @@ def generate_table(data):
         lines.append("Nessuna MPEC trovata per questo osservatorio.")
     else:
         for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
+            h = d.get('H', '?')
+            e = d.get('e', '?')
+            i = d.get('i', '?')
+            moid = d.get('MOID', '?')
+
             lines.append(
-                f"📄 **[{d.get('mpec_code','?')}]** — {d.get('object','?')}\n"
-                f"• 💡 H={d.get('H','?')} e={d.get('e','?')} i={d.get('i','?')}° MOID={d.get('MOID','?')} AU\n"
-                f"• 📅 {d.get('issued','?')}\n"
-                f"<{d.get('url','')}>"
+                "─────────────────────────────\n"
+                f"**🧾 MPEC {d.get('mpec_code','?')} — {d.get('object','?')}**\n"
+                f"> 🪙 **Magnitudine assoluta (H):** {h}\n"
+                f"> 🌀 **Eccentricità orbitale (e):** {e}\n"
+                f"> 📐 **Inclinazione dell’orbita (i):** {i}°\n"
+                f"> 🌍 **MOID (distanza minima da Terra):** {moid} AU\n"
+                f"> 📅 **Data di emissione:** {d.get('issued','?')}\n"
+                f"🔗 {d.get('url','')}"
             )
 
     lines += [
         "",
+        "─────────────────────────────",
+        "📘 **Legenda dei parametri:**",
+        "• **H (Magnitudine assoluta):** luminosità teorica dell’oggetto a 1 UA dal Sole e dalla Terra — più basso → più brillante.",
+        "• **e (Eccentricità):** misura di quanto l’orbita è ellittica (0 = circolare, 1 = parabolica).",
+        "• **i (Inclinazione):** angolo del piano orbitale rispetto all’eclittica terrestre (in gradi).",
+        "• **MOID (Minimum Orbit Intersection Distance):** distanza minima teorica tra l’orbita dell’oggetto e quella terrestre, in unità astronomiche (AU).",
+        "",
         "---",
-        f"🪐 Generato automaticamente dal **{OBSERVATORY_NAME}**",
-        f"🌐 Fonte dati: [Minor Planet Center](https://www.minorplanetcenter.net/mpec/RecentMPECs.html)"
+        f"🧠 Generato automaticamente dal **{OBSERVATORY_NAME}**",
+        f"🌍 Fonte dati: [Minor Planet Center – Recent MPECs](https://www.minorplanetcenter.net/mpec/RecentMPECs.html)"
     ]
 
     content = "\n".join(lines)
