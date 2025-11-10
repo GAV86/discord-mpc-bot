@@ -104,12 +104,15 @@ def fetch_mpec_details(url):
         if obs_lines:
             data["observations"] = [line.strip() for line in obs_lines]
 
-    # ✅ Dettagli osservatorio (pulisce HTML)
-    obs_details_block = re.search(rf"{OBSERVATORY_CODE}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)", text, re.S | re.I)
-    if obs_details_block:
-        raw = obs_details_block.group(1).strip()
-        clean = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
-        data["observatory_details"] = clean
+    # ✅ Dettagli osservatorio (solo blocco "Observer details")
+    details_section = re.search(r"Observer details:(.*?)(Orbital elements:|Ephemeris:|Residuals:|$)", text, re.S | re.I)
+    if details_section:
+        section_text = details_section.group(1)
+        match = re.search(rf"^{OBSERVATORY_CODE}\s+(.*)", section_text, re.M)
+        if match:
+            raw = match.group(1).strip()
+            clean = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+            data["observatory_details"] = clean
 
     # Codice MPEC
     code_match = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
@@ -117,6 +120,7 @@ def fetch_mpec_details(url):
         data["mpec_code"] = code_match.group(1)
 
     return data
+
 
 # ---------------- STORAGE ----------------
 def load_existing_data():
@@ -163,13 +167,14 @@ def send_to_discord(data):
                 emoji_H = "🌕"
 
         desc = [
+            f"📊 **{len(d.get('observations', []))} osservazioni da {OBSERVATORY_CODE}** • MOID {d.get('MOID','?')} AU • H={H}",
             f"**{emoji_H} Magnitudine assoluta (H):** {H} — Luminosità intrinseca",
             f"**🌀 Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
             f"**📐 Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica",
             f"**🌍 MOID:** {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
             f"**📅 Data di emissione:** {d.get('issued','?')}",
             f"**🔗 [Pagina MPEC]({d.get('url','')})**",
-            "────────────────────────"
+            "> ─────────────────────────"
         ]
 
         if d.get("observations"):
@@ -185,7 +190,6 @@ def send_to_discord(data):
             "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
         })
 
-    # Messaggio principale
     header = (
         f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
         f"Aggiornato al **{now}**\n"
@@ -194,7 +198,7 @@ def send_to_discord(data):
         f"• Oggetti con MOID < 0.05 AU: **{close_approaches}**\n"
         f"• Potenzialmente pericolosi (MOID < 0.01 AU): **{hazardous}**\n"
         f"• Magnitudine media (H): **{avg_H}**\n"
-        "────────────────────────"
+        "> ─────────────────────────"
     )
 
     headers = {"Content-Type": "application/json"}
