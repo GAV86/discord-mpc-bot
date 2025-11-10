@@ -9,13 +9,12 @@ from datetime import datetime
 MPC_RECENT_URL = "https://www.minorplanetcenter.net/mpec/RecentMPECs.html"
 BASE_URL = "https://www.minorplanetcenter.net/mpec/"
 ARCHIVE_FILE = "mpc_data.json"
-TABLE_FILE = "mpc_table.md"
 MESSAGE_ID_FILE = "discord_message_id.txt"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 # 🔭 Codice e nome dell’osservatorio
-OBSERVATORY_CODE = "I52"
-OBSERVATORY_NAME = "Steward Observatory, Mt. Lemmon Station"
+OBSERVATORY_CODE = "D65"
+OBSERVATORY_NAME = "Osservatorio Astronomico G. Beltrame"
 # ----------------------------------------
 
 EXCLUDED_KEYWORDS = [
@@ -23,51 +22,7 @@ EXCLUDED_KEYWORDS = [
     "CIRCULAR", "RETRACTION", "EPHEMERIS", "CORRIGENDA"
 ]
 
-
-# ---------------- FUNZIONI ----------------
-
-def send_to_discord(file_path):
-    """Aggiorna o invia la tabella su Discord, mantenendo lo stesso messaggio"""
-    if not DISCORD_WEBHOOK:
-        print("❌ Errore: variabile DISCORD_WEBHOOK non trovata.")
-        return
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    if len(content) > 1900:
-        content = content[:1900] + "\n*(troncato per lunghezza Discord)*"
-
-    message_id = None
-    if os.path.exists(MESSAGE_ID_FILE):
-        with open(MESSAGE_ID_FILE, "r") as f:
-            message_id = f.read().strip()
-
-    headers = {"Content-Type": "application/json"}
-
-    if message_id:
-        patch_url = DISCORD_WEBHOOK + f"/messages/{message_id}"
-        r = requests.patch(patch_url, json={"content": content}, headers=headers)
-        if r.status_code == 200:
-            print(f"✅ Messaggio Discord aggiornato (ID {message_id})")
-            return
-        else:
-            print(f"⚠️ Errore aggiornamento messaggio ({r.status_code}), ne invio uno nuovo...")
-
-    r = requests.post(DISCORD_WEBHOOK, json={"content": content}, headers=headers)
-    if r.status_code in (200, 204):
-        try:
-            data = r.json()
-            if "id" in data:
-                with open(MESSAGE_ID_FILE, "w") as f:
-                    f.write(data["id"])
-        except Exception:
-            pass
-        print("✅ Nuovo messaggio Discord creato.")
-    else:
-        print(f"❌ Errore invio Discord: {r.status_code}")
-
-
+# ---------------- FETCHING ----------------
 def fetch_recent_mpecs():
     """Scarica la pagina RecentMPECs e restituisce la lista delle MPEC più recenti"""
     r = requests.get(MPC_RECENT_URL)
@@ -86,12 +41,11 @@ def fetch_recent_mpecs():
         short = "K" + year[-2:]
         link = f"{BASE_URL}{short}/{short}{code[-3:]}.html"
         mpecs.append({"code": code, "title": title.strip(), "url": link})
-
     return mpecs
 
 
 def fetch_mpec_details(url):
-    """Scarica e analizza una singola MPEC: orbita completa + osservazioni D65"""
+    """Scarica e analizza una singola MPEC: orbita completa + osservazioni dell'osservatorio"""
     try:
         r = requests.get(url, timeout=10)
     except requests.RequestException:
@@ -101,20 +55,19 @@ def fetch_mpec_details(url):
 
     text = r.text
     clean = re.sub(r"\s+", " ", text)
-
     data = {"url": url}
 
-    # --- 🔭 Oggetto principale ---
+    # Oggetto
     obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", clean)
     if obj_match:
         data["object"] = obj_match.group(1).strip()
 
-    # --- 📅 Data emissione ---
+    # Data emissione
     issued = re.search(r"Issued\s+(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
     if issued:
         data["issued"] = issued.group(1)
 
-    # --- 🪐 Parametri orbitali completi ---
+    # Parametri orbitali
     orb = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
     if orb:
         block = orb.group(1).replace("\r", " ")
@@ -139,22 +92,21 @@ def fetch_mpec_details(url):
                 except ValueError:
                     data[key] = m.group(1)
 
-    # --- 🧭 Osservazioni del tuo osservatorio (es. D65) ---
-    obs_code = OBSERVATORY_CODE
-    obs_pattern = re.compile(rf"^.*{obs_code}.*$", re.M)
+    # Osservazioni del tuo osservatorio
+    obs_pattern = re.compile(rf"^.*{OBSERVATORY_CODE}.*$", re.M)
     obs_lines = obs_pattern.findall(text)
     if obs_lines:
         data["observations"] = [line.strip() for line in obs_lines]
 
-    # --- 🔬 Dettagli dell’osservatorio nel blocco finale ---
+    # Dettagli dell’osservatorio (strumento)
     obs_details = re.search(
-        rf"{obs_code}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)",
+        rf"{OBSERVATORY_CODE}\s+(.*?)\.\s*(?:Observers|Observer|Measurer|$)",
         text, re.S | re.I
     )
     if obs_details:
         data["observatory_details"] = obs_details.group(1).strip()
 
-    # --- 📄 Codice MPEC ---
+    # Codice MPEC
     code_match = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
     if code_match:
         data["mpec_code"] = code_match.group(1)
@@ -162,6 +114,7 @@ def fetch_mpec_details(url):
     return data
 
 
+# ---------------- STORAGE ----------------
 def load_existing_data():
     if not os.path.exists(ARCHIVE_FILE):
         return []
@@ -174,56 +127,96 @@ def save_data(data):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def generate_table(data):
-    """Crea una versione formattata e spiegata per Discord"""
+# ---------------- DISCORD ----------------
+def send_to_discord(data):
+    """Invia o aggiorna un embed Discord con tutte le MPEC trovate per l'osservatorio"""
+    if not DISCORD_WEBHOOK:
+        print("❌ Errore: variabile DISCORD_WEBHOOK non trovata.")
+        return
+
+    embeds = []
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    total = len(data)
 
-    lines = [
-        f"🪐 **Archivio MPEC ({OBSERVATORY_NAME})**",
-        f"Aggiornato al {now}",
-        f"Totale MPEC con codice {OBSERVATORY_CODE}: **{total}**",
-        ""
-    ]
+    # 🧮 Statistiche generali
+    moid_vals = [d.get("MOID", 0) for d in data if isinstance(d.get("MOID"), (int, float))]
+    close_approaches = sum(1 for m in moid_vals if m < 0.05)
+    potentially_hazardous = sum(1 for m in moid_vals if m < 0.01)
+    avg_H = round(sum(d.get("H", 0) for d in data if isinstance(d.get("H"), (int, float))) / len(data), 2) if data else 0
 
-    if total == 0:
-        lines.append("Nessuna MPEC trovata per questo osservatorio.")
+    for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
+        # Colore dinamico
+        moid = d.get("MOID", 1.0)
+        try:
+            moid = float(moid)
+        except Exception:
+            moid = 1.0
+        color = 0x3388ff
+        if moid < 0.05:
+            color = 0xFFD700
+        if moid < 0.01:
+            color = 0xFF5555
+
+        desc = []
+        desc.append(f"🪙 **Magnitudine assoluta (H):** {d.get('H','?')} — Luminosità intrinseca dell’oggetto")
+        desc.append(f"🌀 **Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita (0=circolare)")
+        desc.append(f"📐 **Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica")
+        desc.append(f"🌍 **MOID:** {d.get('MOID','?')} AU — Minima distanza orbitale dalla Terra")
+        desc.append(f"📅 **Data di emissione:** {d.get('issued','?')}")
+        desc.append(f"🔗 [Apri su Minor Planet Center]({d.get('url','')})")
+
+        if d.get("observations"):
+            obs_lines = "\n".join(d["observations"][:3])
+            desc.append(f"\n👁️ **Osservazioni ({OBSERVATORY_CODE}):**\n```{obs_lines}```")
+
+        if d.get("observatory_details"):
+            desc.append(f"🔭 **Strumento:** {d['observatory_details']}")
+
+        embeds.append({
+            "title": f"MPEC {d.get('mpec_code','?')} — {d.get('object','?')}",
+            "description": "\n".join(desc),
+            "color": color,
+            "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
+        })
+
+    header_content = (
+        f"🪐 **Archivio MPEC ({OBSERVATORY_NAME})**\n"
+        f"Aggiornato al {now}\n"
+        f"Totale MPEC con codice {OBSERVATORY_CODE}: **{len(data)}**\n\n"
+        f"📊 **Statistiche rapide:**\n"
+        f"• Oggetti con MOID < 0.05 AU: {close_approaches}\n"
+        f"• Potenzialmente pericolosi (MOID < 0.01 AU): {potentially_hazardous}\n"
+        f"• Magnitudine assoluta media (H): {avg_H}"
+    )
+
+    message_id = None
+    if os.path.exists(MESSAGE_ID_FILE):
+        with open(MESSAGE_ID_FILE, "r") as f:
+            message_id = f.read().strip()
+
+    headers = {"Content-Type": "application/json"}
+    payload = {"content": header_content, "embeds": embeds}
+
+    if message_id:
+        patch_url = DISCORD_WEBHOOK + f"/messages/{message_id}"
+        r = requests.patch(patch_url, json=payload, headers=headers)
+        if r.status_code == 200:
+            print(f"✅ Messaggio Discord aggiornato (ID {message_id})")
+            return
+        else:
+            print(f"⚠️ Errore aggiornamento messaggio ({r.status_code}), ne invio uno nuovo...")
+
+    r = requests.post(DISCORD_WEBHOOK, json=payload, headers=headers)
+    if r.status_code in (200, 204):
+        try:
+            data_json = r.json()
+            if "id" in data_json:
+                with open(MESSAGE_ID_FILE, "w") as f:
+                    f.write(data_json["id"])
+        except Exception:
+            pass
+        print("✅ Nuovo messaggio Discord creato.")
     else:
-        for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
-            h = d.get('H', '?')
-            e = d.get('e', '?')
-            i = d.get('i', '?')
-            moid = d.get('MOID', '?')
-
-            lines.append(
-                "─────────────────────────────\n"
-                f"**🧾 MPEC {d.get('mpec_code','?')} — {d.get('object','?')}**\n"
-                f"> 🪙 **Magnitudine assoluta (H):** {h}\n"
-                f"> 🌀 **Eccentricità orbitale (e):** {e}\n"
-                f"> 📐 **Inclinazione dell’orbita (i):** {i}°\n"
-                f"> 🌍 **MOID (distanza minima da Terra):** {moid} AU\n"
-                f"> 📅 **Data di emissione:** {d.get('issued','?')}\n"
-                f"🔗 {d.get('url','')}"
-            )
-
-    lines += [
-        "",
-        "─────────────────────────────",
-        "📘 **Legenda dei parametri:**",
-        "• **H (Magnitudine assoluta):** luminosità teorica dell’oggetto a 1 UA dal Sole e dalla Terra — più basso → più brillante.",
-        "• **e (Eccentricità):** misura di quanto l’orbita è ellittica (0 = circolare, 1 = parabolica).",
-        "• **i (Inclinazione):** angolo del piano orbitale rispetto all’eclittica terrestre (in gradi).",
-        "• **MOID (Minimum Orbit Intersection Distance):** distanza minima teorica tra l’orbita dell’oggetto e quella terrestre, in unità astronomiche (AU).",
-        "",
-        "---",
-        f"🧠 Generato automaticamente dal **{OBSERVATORY_NAME}**",
-        f"🌍 Fonte dati: [Minor Planet Center – Recent MPECs](https://www.minorplanetcenter.net/mpec/RecentMPECs.html)"
-    ]
-
-    content = "\n".join(lines)
-    with open(TABLE_FILE, "w", encoding="utf-8") as f:
-        f.write(content)
-    print(f"📄 Tabella aggiornata salvata in {TABLE_FILE} ({total} voci totali)")
+        print(f"❌ Errore invio Discord: {r.status_code}")
 
 
 # ---------------- MAIN ----------------
@@ -240,20 +233,18 @@ def main():
         if m["code"] in known:
             continue
         d = fetch_mpec_details(m["url"])
-        if d:
+        if d and d.get("observations"):
             print(f"✅ Aggiunta {m['code']} ({d.get('object','?')})")
             new_data.append(d)
 
     if new_data:
         all_data = existing + new_data
         save_data(all_data)
-        generate_table(all_data)
         print(f"📈 Archivio aggiornato: {len(all_data)} voci totali.")
+        send_to_discord(all_data)
     else:
-        print(f"ℹ️ Nessuna nuova MPEC trovata per {OBSERVATORY_CODE}.")
-        generate_table(existing)
-
-    send_to_discord(TABLE_FILE)
+        print("ℹ️ Nessuna nuova MPEC trovata per questo osservatorio.")
+        send_to_discord(existing)
 
 
 if __name__ == "__main__":
