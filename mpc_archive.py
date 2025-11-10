@@ -14,8 +14,8 @@ MESSAGE_ID_FILE = "discord_message_id.txt"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 # 🔭 Codice e nome dell’osservatorio
-OBSERVATORY_CODE = "D65"
-OBSERVATORY_NAME = "Osservatorio Astronomico “G. Beltrame”"
+OBSERVATORY_CODE = "I52"
+OBSERVATORY_NAME = "Steward Observatory, Mt. Lemmon Station"
 # ----------------------------------------
 
 # Parole da escludere (non NEO)
