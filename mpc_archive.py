@@ -1,106 +1,111 @@
 import requests
 from bs4 import BeautifulSoup
 import json
-import os
 from datetime import datetime
+import os
 
 # ---------------- CONFIG ----------------
-YEARS = [2024, 2025]          # 🔁 Anni da scansionare
-OBS_CODE = "D65"              # 🔭 Codice osservatorio
-ARCHIVE_FILE = "archive.json" # Archivio cumulativo
+OBS_CODE = "D65"  # Codice osservatorio
+YEARS = [2024, 2025]  # Anni da scansionare
+OUTPUT_JSON = "archive.json"
+OUTPUT_MD = "archive_table.md"
+BASE_URL = "https://www.minorplanetcenter.net/mpec/K{year}/"
 # ----------------------------------------
 
-def fetch_mpec_links(base_url, year):
-    """Scarica la lista di tutte le MPEC per l'anno indicato."""
-    r = requests.get(base_url)
-    if r.status_code != 200:
-        print(f"❌ Errore caricando {base_url}: {r.status_code}")
+def fetch_mpec_links(year):
+    """Scarica tutti i link MPEC per un dato anno."""
+    url = BASE_URL.format(year=str(year)[-2:])
+    response = requests.get(url)
+    if response.status_code != 200:
+        print(f"⚠️ Errore nel recupero MPEC {year}: {response.status_code}")
         return []
-    soup = BeautifulSoup(r.text, "html.parser")
+    
+    soup = BeautifulSoup(response.text, "html.parser")
     links = [
-        base_url + a["href"]
-        for a in soup.find_all("a", href=True)
-        if a["href"].endswith(".html")
+        ("https://www.minorplanetcenter.net" + a["href"], a.text.strip())
+        for a in soup.find_all("a") if a["href"].endswith(".html")
     ]
-    print(f"🔗 Trovate {len(links)} MPEC nel {year}")
+    print(f"📅 {year}: trovate {len(links)} MPEC")
     return links
 
-def load_archive():
-    if os.path.exists(ARCHIVE_FILE):
-        with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
+def extract_info(link, code):
+    """Estrae le info principali da una singola MPEC."""
+    try:
+        html = requests.get(link).text
+        if code not in html:
+            return None  # Non contiene D65
+        
+        soup = BeautifulSoup(html, "html.parser")
+        title = soup.find("title").text.strip()
+        lines = [l.strip() for l in soup.text.splitlines() if l.strip()]
+        date_line = next((l for l in lines if "M.P.E.C." in l), "")
+        date = date_line.split()[-1] if date_line else "n/d"
+        
+        # Cerca magnitudine e MOID
+        mag = "n/d"
+        moid = "n/d"
+        for l in lines:
+            if "H =" in l:
+                mag = l.split("H =")[1].split()[0]
+            if "MOID" in l:
+                moid = l.split("MOID")[1].split()[0]
+        
+        return {
+            "mpec": title,
+            "link": link,
+            "date": date,
+            "mag": mag,
+            "moid": moid
+        }
+    except Exception as e:
+        print(f"Errore su {link}: {e}")
+        return None
+
+def load_existing():
+    """Carica archivio esistente se presente."""
+    if os.path.exists(OUTPUT_JSON):
+        with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
             return json.load(f)
     return []
 
-def save_archive(data):
-    with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
+def save_data(data):
+    """Salva archivio e tabella Markdown."""
+    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-
-def parse_mpec_page(url, year):
-    """Legge una singola MPEC e verifica se contiene l'osservatorio."""
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code != 200:
-            return None
-        if OBS_CODE not in r.text:
-            return None
-        soup = BeautifulSoup(r.text, "html.parser")
-        title = soup.find("title").text.strip() if soup.find("title") else "MPEC sconosciuto"
-        date = None
-        for line in r.text.splitlines():
-            if "M.P.E.C." in line:
-                date = line.strip()
-                break
-        return {
-            "url": url,
-            "title": title,
-            "year": year,
-            "date": date or "Data non trovata",
-        }
-    except Exception as e:
-        print("⚠️ Errore leggendo", url, e)
-        return None
-
-def generate_table(entries):
-    """Crea una tabella Markdown per Discord."""
-    lines = [
-        "| 📄 MPEC | 📅 Data | 🗓️ Anno | 🔗 Link |",
-        "|:--------|:--------|:--------|:--------|",
-    ]
-    for e in sorted(entries, key=lambda x: (x["year"], x["url"]), reverse=True):
-        lines.append(f"| {e['title']} | {e['date']} | {e['year']} | [Apri]({e['url']}) |")
-    return "\n".join(lines)
+    
+    # Genera tabella Markdown
+    md = (
+        "📊 **Archivio osservazioni D65**\n\n"
+        "| Data | MPEC | Mag | MOID | Link |\n"
+        "|------|------|-----|------|------|\n"
+    )
+    for item in sorted(data, key=lambda x: x["date"], reverse=True):
+        md += f"| {item['date']} | {item['mpec']} | {item['mag']} | {item['moid']} | [Apri]({item['link']}) |\n"
+    
+    with open(OUTPUT_MD, "w", encoding="utf-8") as f:
+        f.write(md)
+    
+    print(f"✅ Archivio salvato ({len(data)} voci).")
 
 def main():
-    archive = load_archive()
-    known_urls = {a["url"] for a in archive}
-    print(f"📚 Archivio iniziale: {len(archive)} voci")
-
-    new_entries = []
+    archive = load_existing()
+    seen_links = {a["link"] for a in archive}
+    total_found = 0
 
     for year in YEARS:
-        base_url = f"https://www.minorplanetcenter.net/mpec/{year}/"
-        print(f"\n📆 Scansione MPEC {year}...")
-        links = fetch_mpec_links(base_url, year)
-        for url in links:
-            if url in known_urls:
+        for link, name in fetch_mpec_links(year):
+            if link in seen_links:
                 continue
-            entry = parse_mpec_page(url, year)
-            if entry:
-                print(f"✅ Nuova MPEC trovata ({year}): {entry['title']}")
-                new_entries.append(entry)
-                archive.append(entry)
-
-    if new_entries:
-        save_archive(archive)
-        print(f"💾 Salvate {len(new_entries)} nuove MPEC in {ARCHIVE_FILE}")
+            info = extract_info(link, OBS_CODE)
+            if info:
+                archive.append(info)
+                total_found += 1
+    
+    if total_found:
+        print(f"🛰️ Trovate {total_found} nuove MPEC contenenti {OBS_CODE}.")
+        save_data(archive)
     else:
-        print("📭 Nessuna nuova MPEC trovata.")
-
-    # genera tabella
-    table = generate_table(archive)
-    with open("archive_table.md", "w", encoding="utf-8") as f:
-        f.write(table)
-    print("📄 Tabella aggiornata in archive_table.md")
+        print("ℹ️ Nessuna nuova MPEC trovata.")
 
 if __name__ == "__main__":
     main()
