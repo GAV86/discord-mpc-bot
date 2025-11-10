@@ -1,8 +1,8 @@
-name: MPC Bot
+name: MPC Archive Builder
 
 on:
   schedule:
-    - cron: "0 8,20 * * *"
+    - cron: "0 8 * * *"   # una volta al giorno alle 08:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -11,10 +11,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - run: pip install requests beautifulsoup4
+
       - run: python mpc_archive.py
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
