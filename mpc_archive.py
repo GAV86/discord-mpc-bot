@@ -61,7 +61,7 @@ def fetch_mpec_details(url):
     obs_block = re.search(r"Observer details:(.*?)(Orbital elements|Ephemeris|Residuals|M\. P\. C\.|$)",
                           text, re.S | re.I)
     if not obs_block or OBSERVATORY_CODE not in obs_block.group(1):
-        return None  # non compare l’osservatorio
+        return None
 
     # Oggetto
     obj_match = re.search(r"\b(20\d{2}\s+[A-Z]{1,2}\d{0,3})\b", text)
@@ -73,18 +73,13 @@ def fetch_mpec_details(url):
     if issued:
         data["issued"] = issued.group(1)
 
-    # Parametri orbitali principali
+    # Parametri orbitali
     orb = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
     if orb:
         block = orb.group(1).replace("\r", " ")
         fields = {
-            "a": r"\ba\s*=?\s*([\d.]+)",
             "e": r"\be\s*=?\s*([\d.]+)",
             "i": r"Incl\.\s*([\d.]+)",
-            "Omega": r"Node\s*([\d.]+)",
-            "omega": r"Peri\.\s*([\d.]+)",
-            "q": r"\bq\s*=?\s*([\d.]+)",
-            "P": r"\bP\s*=?\s*([\d.]+)",
             "H": r"\bH\s*=?\s*([\d.]+)",
             "MOID": r"MOID\s*=?\s*([\d.]+)"
         }
@@ -96,7 +91,7 @@ def fetch_mpec_details(url):
                 except ValueError:
                     data[key] = m.group(1)
 
-    # ✅ Blocca "Observations" solo fino a "Observer details"
+    # Osservazioni
     obs_section = re.search(r"Observations:(.*?)(Observer details:|Orbital elements:|Residuals:|Ephemeris:|$)",
                             text, re.S | re.I)
     if obs_section:
@@ -106,20 +101,25 @@ def fetch_mpec_details(url):
         if obs_lines:
             data["observations"] = [line.strip() for line in obs_lines]
 
-    # ✅ Dettagli osservatorio completi
+    # Estrattore dettagli osservatorio
     details_section = re.search(r"Observer details:(.*?)(Orbital elements:|Ephemeris:|Residuals:|$)",
                                 text, re.S | re.I)
     if details_section:
-        section_text = details_section.group(1)
-        match = re.search(rf"^{OBSERVATORY_CODE}\s+(.*?)(?=\n[A-Z0-9]{{3,}}\s|$)",
-                          section_text, re.S | re.M)
-        if match:
-            raw = match.group(1).strip()
-            clean = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
-            clean = re.sub(r"\s{2,}", " ", clean)
-            data["observatory_details"] = clean
+        raw = BeautifulSoup(details_section.group(1), "html.parser").get_text(" ", strip=True)
+        raw = re.sub(r"\s{2,}", " ", raw)
+        if OBSERVATORY_CODE in raw:
+            section = re.search(rf"{OBSERVATORY_CODE}\s+(.*?)(?=\s[A-Z0-9]{{3,}}\s|$)", raw)
+            if section:
+                raw = section.group(1)
+        instr = re.search(r"(\d+\.\d+-m\s.*?CMOS|CCD|Cassegrain.*?)(?:\.|$)", raw, re.I)
+        observers = re.search(r"Observers?\s+([A-Za-z.,\s]+)", raw)
+        measurer = re.search(r"Measurer\s+([A-Za-z.,\s]+)", raw)
+        data["instrument_line"] = instr.group(1).strip() if instr else None
+        obs_names = []
+        if observers: obs_names.append(observers.group(1).strip().rstrip("."))
+        if measurer: obs_names.append("Misuratore " + measurer.group(1).strip().rstrip("."))
+        data["observer_names"] = "; ".join(obs_names) if obs_names else None
 
-    # Codice MPEC
     code_match = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
     if code_match:
         data["mpec_code"] = code_match.group(1)
@@ -147,7 +147,7 @@ def send_to_discord(data):
     embeds = []
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    # 📊 Statistiche globali
+    # Statistiche globali
     moid_vals = [d.get("MOID", 0) for d in data if isinstance(d.get("MOID"), (int, float))]
     close_approaches = sum(1 for m in moid_vals if m < 0.05)
     hazardous = sum(1 for m in moid_vals if m < 0.01)
@@ -155,37 +155,28 @@ def send_to_discord(data):
 
     for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
         moid = float(d.get("MOID", 1.0)) if isinstance(d.get("MOID"), (int, float, str)) else 1.0
+        color = 0x3388ff if moid >= 0.05 else (0xFFD700 if moid >= 0.01 else 0xFF5555)
 
-        # 🎯 Emoji dinamica in base al rischio MOID
-        emoji = "🔵"
-        if moid < 0.05:
-            emoji = "🟡"
-        if moid < 0.01:
-            emoji = "🔴"
-
+        emoji = "🔵" if moid >= 0.05 else ("🟡" if moid >= 0.01 else "🔴")
         H = d.get("H", "?")
         emoji_H = "🌑"
         if isinstance(H, (int, float)):
-            if H < 20:
-                emoji_H = "☀️"
-            elif H < 26:
-                emoji_H = "🌕"
+            if H < 20: emoji_H = "☀️"
+            elif H < 26: emoji_H = "🌕"
 
-        # Titolo cliccabile con emoji di rischio
-        title_text = f"{emoji} MPEC {d.get('mpec_code','?')} — [{d.get('object','?')}]({d.get('url','')})"
-
+        title_text = f"{emoji} **MPEC {d.get('mpec_code','?')} — [{d.get('object','?')}]({d.get('url','')})**"
         desc = [
-            f"📊 **{len(d.get('observations', []))} osservazioni da {OBSERVATORY_CODE}** • MOID {d.get('MOID','?')} AU • H={H}",
-            f"{emoji_H} **Magnitudine assoluta (H):** {H} — Luminosità intrinseca",
-            f"🌀 **Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
-            f"📐 **Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica",
-            f"🌍 **MOID:** {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
+            f"📊 **{len(d.get('observations', []))} osservazioni da {OBSERVATORY_CODE}**",
+            f"• **MOID:** {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
+            f"• **Magnitudine (H):** {H} — Luminosità intrinseca",
+            f"• **Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
+            f"• **Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica",
             f"📅 **Data di emissione:** {d.get('issued','?')}",
-            f"🔗 **[Pagina MPEC]({d.get('url','')})**",
-            "> ─────────────────────────"
+            f"🔗 [Pagina MPEC]({d.get('url','')})",
+            "─────────────────────────"
         ]
 
-        # ✅ Osservazioni in formato elenco (ottimizzato per mobile)
+        # Osservazioni elenco
         if d.get("observations"):
             lines = []
             for line in d["observations"]:
@@ -199,26 +190,32 @@ def send_to_discord(data):
                     mag = parts[9] if re.match(r"^\d", parts[9]) else "—"
                     cod = parts[-1]
                     lines.append(
-                        f"• **{code}** — {date}\n"
-                        f"  🧭 RA: {ra} | DEC: {dec}\n"
+                        f"• **{code} — {date}**\n"
+                        f"  🧭 RA: {ra}\n"
+                        f"  📈 DEC: {dec}\n"
                         f"  💡 Magnitudine: {mag} | 📄 Codice: {cod}"
                     )
                 else:
                     lines.append("• " + line)
-            desc.append(f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n".join(lines))
+            desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n".join(lines))
 
-        # ✅ Strumento completo
-        if d.get("observatory_details"):
-            desc.append(f"🔭 **Strumento / Dettagli osservatorio**\n_{d['observatory_details']}_")
+        # Strumento / osservatori
+        if d.get("instrument_line") or d.get("observer_names"):
+            desc.append("─────────────────────────")
+            desc.append("🔭 **Strumento / Osservatorio**")
+            if d.get("instrument_line"):
+                desc.append(f"• {d['instrument_line']}")
+            desc.append(f"🏛️ **Osservatorio:** {OBSERVATORY_NAME}")
+            if d.get("observer_names"):
+                desc.append(f"👥 **Osservatori:** {d['observer_names']}")
 
         embeds.append({
             "title": title_text,
             "description": "\n".join(desc),
-            "color": 0x3388ff if moid >= 0.05 else (0xFFD700 if moid >= 0.01 else 0xFF5555),
-            "footer": {"text": f"{OBSERVATORY_NAME} • Aggiornato al {now}"}
+            "color": color,
+            "footer": {"text": f"Aggiornato al {now}"}
         })
 
-    # 🪐 Messaggio principale
     header = (
         f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
         f"Aggiornato al **{now}**\n"
@@ -259,6 +256,7 @@ def send_to_discord(data):
         print("✅ Nuovo messaggio Discord creato.")
     else:
         print(f"❌ Errore invio Discord: {r.status_code}")
+
 
 # ---------------- MAIN ----------------
 def main():
