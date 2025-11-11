@@ -183,21 +183,28 @@ def send_to_discord(data):
             for line in d["observations"]:
                 line = re.sub(r"\s+", " ", line.strip())
                 parts = re.split(r"\s+", line)
-                if len(parts) >= 10:
+                if len(parts) >= 14:
                     code = parts[0]
-                    date = f"2025-{parts[2]}-{parts[3]}" if len(parts[2]) == 2 else f"{parts[2]}-{parts[3]}"
-                    # Ricostruzione pulita di RA e DEC
-                    ra = " ".join(parts[4:7])
-                    dec = " ".join(parts[7:10])
-                    mag = parts[9] if re.match(r"^\d", parts[9]) else "—"
-                    cod = parts[-1]
-                    lines.append(
-                        f"• **{code} — {date}**\n"
-                        f"🧭 RA: {ra}\n"
-                        f"📈 DEC: {dec}\n"
-                        f"💡 Magnitudine: {mag}\n"
-                        f"📄 Codice: {cod}"
-                    )
+                    date = f"2025-{parts[2]}-{parts[3]}"
+                    # Trova il segno di declinazione (+ o -)
+                    sign_index = next((i for i, p in enumerate(parts) if p.startswith(('+', '-'))), None)
+                    if sign_index and sign_index >= 4:
+                        ra_parts = parts[4:sign_index]
+                        dec_parts = parts[sign_index:sign_index + 3]
+                        mag_index = sign_index + 3
+                        ra = " ".join(ra_parts)
+                        dec = " ".join(dec_parts)
+                        mag = parts[mag_index] if mag_index < len(parts) else "—"
+                        cod = parts[-1]
+                        lines.append(
+                            f"• **{code} — {date}**\n"
+                            f"🧭 RA: {ra}\n"
+                            f"📈 DEC: {dec}\n"
+                            f"💡 Magnitudine: {mag}\n"
+                            f"📄 Codice: {cod}"
+                        )
+                    else:
+                        lines.append("• " + line)
                 else:
                     lines.append("• " + line)
             desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n\n".join(lines))
@@ -211,7 +218,6 @@ def send_to_discord(data):
             if d.get("observer_names"):
                 desc.append(f"👥 **Osservatori:** {d['observer_names']}")
 
-        # Footer
         desc.append(f"\n🕒 Aggiornato al {now}")
 
         embeds.append({
