@@ -100,7 +100,7 @@ def fetch_mpec_details(url):
         if obs_lines:
             data["observations"] = [line.strip() for line in obs_lines]
 
-    # Arco osservativo e residui medi (facoltativi)
+    # Arco osservativo e residui medi
     residuals = re.search(rf"{OBSERVATORY_CODE}.*?([\+\-]?\d+\.\d+).*?([\+\-]?\d+\.\d+)", text)
     if residuals:
         data["residuals"] = f"ΔRA {residuals.group(1)}″ / ΔDec {residuals.group(2)}″"
@@ -119,7 +119,7 @@ def fetch_mpec_details(url):
             if section:
                 raw = section.group(1)
 
-        # ✅ Estrazione corretta e completa della descrizione dello strumento
+        # ✅ Estrazione corretta della descrizione completa dello strumento
         instr = re.search(
             r"(\d+\.\d+-m\s.*?(?:Cassegrain|Reflector|Schmidt).*?(?:CMOS|CCD))",
             raw, re.I
@@ -239,6 +239,8 @@ def send_to_discord(data):
             desc.append(f"👥 Osservatori: {d['observer_names']}")
         if d.get("arc_length"):
             desc.append(f"📏 Arco osservativo: {d['arc_length']}")
+        if d.get("residuals"):
+            desc.append(f"📉 Residui medi {OBSERVATORY_CODE}: {d['residuals']}")
         desc.append(f"🕒 Aggiornato al {now}")
 
         embeds.append({
