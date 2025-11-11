@@ -118,13 +118,24 @@ def fetch_mpec_details(url):
             section = re.search(rf"{OBSERVATORY_CODE}\s+(.*?)(?=\s[A-Z0-9]{{3,}}\s|$)", raw)
             if section:
                 raw = section.group(1)
-        instr = re.search(r"(\d+\.\d+-m\s.*?CMOS|CCD|Cassegrain.*?)(?:\.|$)", raw, re.I)
+
+        # ✅ Estrazione corretta e completa della descrizione dello strumento
+        instr = re.search(
+            r"(\d+\.\d+-m\s.*?(?:Cassegrain|Reflector|Schmidt).*?(?:CMOS|CCD))",
+            raw, re.I
+        )
+        if instr:
+            data["instrument_line"] = instr.group(1).strip().rstrip(".")
+        else:
+            data["instrument_line"] = None
+
         observers = re.search(r"Observers?\s+([A-Za-z.,\s]+)", raw)
         measurer = re.search(r"Measurer\s+([A-Za-z.,\s]+)", raw)
-        data["instrument_line"] = instr.group(1).strip() if instr else None
         obs_names = []
-        if observers: obs_names.append(observers.group(1).strip().rstrip("."))
-        if measurer: obs_names.append("Misuratore " + measurer.group(1).strip().rstrip("."))
+        if observers:
+            obs_names.append(observers.group(1).strip().rstrip("."))
+        if measurer:
+            obs_names.append("Misuratore " + measurer.group(1).strip().rstrip("."))
         data["observer_names"] = "; ".join(obs_names) if obs_names else None
 
     code_match = re.search(r"M\.?P\.?E\.?C\.?\s*(\d{4}-[A-Z]\d{2,3})", text)
@@ -132,7 +143,6 @@ def fetch_mpec_details(url):
         data["mpec_code"] = code_match.group(1)
 
     return data
-
 
 # ---------------- STORAGE ----------------
 def load_existing_data():
