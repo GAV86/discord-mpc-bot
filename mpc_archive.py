@@ -177,37 +177,39 @@ def send_to_discord(data):
             "─────────────────────────"
         ]
 
-        # 👁️ Osservazioni formattate correttamente
+        # ----------- OSSERVAZIONI -----------
         if d.get("observations"):
-            lines = []
+            obs_texts = []
+            pattern = re.compile(
+                r"^(?P<obj>[A-Z0-9]+)\s+[A-Z]{1,2}(?P<year>\d{4})\s+"
+                r"(?P<month>\d{2})\s+(?P<day>[\d.]+)\s+"
+                r"(?P<ra>\d{2}\s+\d{2}\s+\d{2}\.\d+)"
+                r"(?P<dec>[+\-]\d{2}\s+\d{2}\s+\d{2}\.\d+)"
+                r".*?(?P<mag>\d+\.\d+)\s+(?P<code>[A-Z0-9]+L47)$"
+            )
+
             for line in d["observations"]:
-                line = re.sub(r"\s+", " ", line.strip())
-                parts = re.split(r"\s+", line)
-                if len(parts) >= 14:
-                    code = parts[0]
-                    date = f"2025-{parts[2]}-{parts[3]}"
-                    # Trova il segno di declinazione (+ o -)
-                    sign_index = next((i for i, p in enumerate(parts) if p.startswith(('+', '-'))), None)
-                    if sign_index and sign_index >= 4:
-                        ra_parts = parts[4:sign_index]
-                        dec_parts = parts[sign_index:sign_index + 3]
-                        mag_index = sign_index + 3
-                        ra = " ".join(ra_parts)
-                        dec = " ".join(dec_parts)
-                        mag = parts[mag_index] if mag_index < len(parts) else "—"
-                        cod = parts[-1]
-                        lines.append(
-                            f"• **{code} — {date}**\n"
-                            f"🧭 RA: {ra}\n"
-                            f"📈 DEC: {dec}\n"
-                            f"💡 Magnitudine: {mag}\n"
-                            f"📄 Codice: {cod}"
-                        )
-                    else:
-                        lines.append("• " + line)
+                line = line.strip()
+                m = pattern.search(line)
+                if m:
+                    code = m.group("obj")
+                    date = f"{m.group('year')}-{m.group('month')}-{m.group('day')}"
+                    ra = m.group("ra").strip()
+                    dec = m.group("dec").strip()
+                    mag = m.group("mag")
+                    cod = m.group("code")
+                    obs_texts.append(
+                        f"• **{code} — {date}**\n"
+                        f"🧭 RA: {ra}\n"
+                        f"📈 DEC: {dec}\n"
+                        f"💡 Magnitudine: {mag}\n"
+                        f"📄 Codice: {cod}"
+                    )
                 else:
-                    lines.append("• " + line)
-            desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n\n".join(lines))
+                    # fallback: se non matcha, mostra la riga grezza
+                    obs_texts.append(f"• {line}")
+
+            desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n\n".join(obs_texts))
 
         # 🔭 Strumento e osservatorio
         if d.get("instrument_line") or d.get("observer_names"):
