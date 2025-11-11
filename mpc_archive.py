@@ -147,7 +147,7 @@ def send_to_discord(data):
     embeds = []
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    # Statistiche globali
+    # 📊 Statistiche globali
     moid_vals = [d.get("MOID", 0) for d in data if isinstance(d.get("MOID"), (int, float))]
     close_approaches = sum(1 for m in moid_vals if m < 0.05)
     hazardous = sum(1 for m in moid_vals if m < 0.01)
@@ -158,25 +158,28 @@ def send_to_discord(data):
         color = 0x3388ff if moid >= 0.05 else (0xFFD700 if moid >= 0.01 else 0xFF5555)
 
         emoji = "🔵" if moid >= 0.05 else ("🟡" if moid >= 0.01 else "🔴")
+
         H = d.get("H", "?")
         emoji_H = "🌑"
         if isinstance(H, (int, float)):
             if H < 20: emoji_H = "☀️"
             elif H < 26: emoji_H = "🌕"
 
-        title_text = f"{emoji} **MPEC {d.get('mpec_code','?')} — [{d.get('object','?')}]({d.get('url','')})**"
+        # Titolo principale con link
+        title_text = f"{emoji} MPEC {d.get('mpec_code','?')} — [{d.get('object','?')}]({d.get('url','')})"
+
+        # 🌌 Parametri orbitali
         desc = [
-            f"📊 **{len(d.get('observations', []))} osservazioni da {OBSERVATORY_CODE}**",
-            f"• **MOID:** {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
-            f"• **Magnitudine (H):** {H} — Luminosità intrinseca",
-            f"• **Eccentricità (e):** {d.get('e','?')} — Forma dell’orbita",
-            f"• **Inclinazione (i):** {d.get('i','?')}° — Angolo rispetto all’eclittica",
-            f"📅 **Data di emissione:** {d.get('issued','?')}",
+            f"{emoji_H} Magnitudine assoluta (H): {H} — Luminosità intrinseca",
+            f"🌀 Eccentricità (e): {d.get('e','?')} — Forma dell’orbita",
+            f"📐 Inclinazione (i): {d.get('i','?')}° — Angolo rispetto all’eclittica",
+            f"🌍 MOID: {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
+            f"📅 Data di emissione: {d.get('issued','?')}",
             f"🔗 [Pagina MPEC]({d.get('url','')})",
             "─────────────────────────"
         ]
 
-        # Osservazioni elenco
+        # 👁️ Osservazioni formattate verticalmente
         if d.get("observations"):
             lines = []
             for line in d["observations"]:
@@ -191,31 +194,34 @@ def send_to_discord(data):
                     cod = parts[-1]
                     lines.append(
                         f"• **{code} — {date}**\n"
-                        f"  🧭 RA: {ra}\n"
-                        f"  📈 DEC: {dec}\n"
-                        f"  💡 Magnitudine: {mag} | 📄 Codice: {cod}"
+                        f"🧭 RA: {ra}+{dec.split()[0] if len(dec.split()) > 0 else ''}\n"
+                        f"📈 DEC: {' '.join(dec.split()[1:]) if len(dec.split()) > 1 else dec}\n"
+                        f"💡 Magnitudine: {mag}\n"
+                        f"📄 Codice: {cod}"
                     )
                 else:
                     lines.append("• " + line)
-            desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n".join(lines))
+            desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n\n".join(lines))
 
-        # Strumento / osservatori
+        # 🔭 Strumento e osservatorio
         if d.get("instrument_line") or d.get("observer_names"):
             desc.append("─────────────────────────")
-            desc.append("🔭 **Strumento / Osservatorio**")
             if d.get("instrument_line"):
-                desc.append(f"• {d['instrument_line']}")
+                desc.append(f"🔭 **Strumento:** {d['instrument_line']}")
             desc.append(f"🏛️ **Osservatorio:** {OBSERVATORY_NAME}")
             if d.get("observer_names"):
                 desc.append(f"👥 **Osservatori:** {d['observer_names']}")
 
+        # Footer finale
+        desc.append(f"\n🕒 Aggiornato al {now}")
+
         embeds.append({
             "title": title_text,
             "description": "\n".join(desc),
-            "color": color,
-            "footer": {"text": f"Aggiornato al {now}"}
+            "color": color
         })
 
+    # 🪐 Header messaggio
     header = (
         f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
         f"Aggiornato al **{now}**\n"
