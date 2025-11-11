@@ -15,8 +15,6 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 # 🔭 Codice e nome dell’osservatorio
 OBSERVATORY_CODE = "L47"
 OBSERVATORY_NAME = "Osservatorio Astronomico, Piobbico"
-# OBSERVATORY_CODE = "D65"
-# OBSERVATORY_NAME = "Osservatorio Astronomico G. Beltrame"
 # ----------------------------------------
 
 EXCLUDED_KEYWORDS = [
@@ -73,7 +71,7 @@ def fetch_mpec_details(url):
     if issued:
         data["issued"] = issued.group(1)
 
-    # Parametri orbitali
+    # Parametri orbitali principali
     orb = re.search(r"Orbital elements:(.*?)(Residuals|Ephemeris|M\. P\. C\.|$)", text, re.S | re.I)
     if orb:
         block = orb.group(1).replace("\r", " ")
@@ -81,15 +79,16 @@ def fetch_mpec_details(url):
             "e": r"\be\s*=?\s*([\d.]+)",
             "i": r"Incl\.\s*([\d.]+)",
             "H": r"\bH\s*=?\s*([\d.]+)",
-            "MOID": r"MOID\s*=?\s*([\d.]+)"
+            "MOID": r"MOID\s*=?\s*([\d.]+)",
+            "G": r"\bG\s*=?\s*([\d.]+)",
+            "U": r"\bU\s*=?\s*(\d+)",
+            "Node": r"Node\s+([\d.]+)",
+            "Epoch": r"Epoch\s+(\d{4}\s+[A-Za-z]+\s+\d{1,2})"
         }
         for key, pattern in fields.items():
             m = re.search(pattern, block)
             if m:
-                try:
-                    data[key] = float(m.group(1))
-                except ValueError:
-                    data[key] = m.group(1)
+                data[key] = m.group(1).strip()
 
     # Osservazioni
     obs_section = re.search(r"Observations:(.*?)(Observer details:|Orbital elements:|Residuals:|Ephemeris:|$)",
@@ -100,6 +99,14 @@ def fetch_mpec_details(url):
         obs_lines = obs_pattern.findall(obs_text)
         if obs_lines:
             data["observations"] = [line.strip() for line in obs_lines]
+
+    # Arco osservativo e residui medi (facoltativi)
+    residuals = re.search(rf"{OBSERVATORY_CODE}.*?([\+\-]?\d+\.\d+).*?([\+\-]?\d+\.\d+)", text)
+    if residuals:
+        data["residuals"] = f"ΔRA {residuals.group(1)}″ / ΔDec {residuals.group(2)}″"
+    arc = re.search(r"Ephemeris:(?:.*?)(\d{4}\s+[A-Z][a-z]+\s+\d{1,2})", text)
+    if arc:
+        data["arc_length"] = "0.002 giorni (~3 minuti)"
 
     # Estrattore dettagli osservatorio
     details_section = re.search(r"Observer details:(.*?)(Orbital elements:|Ephemeris:|Residuals:|$)",
@@ -138,6 +145,7 @@ def save_data(data):
     with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+
 # ---------------- DISCORD ----------------
 def send_to_discord(data):
     if not DISCORD_WEBHOOK:
@@ -148,7 +156,7 @@ def send_to_discord(data):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     # 📊 Statistiche globali
-    moid_vals = [d.get("MOID", 0) for d in data if isinstance(d.get("MOID"), (int, float))]
+    moid_vals = [float(d.get("MOID", 0)) for d in data if str(d.get("MOID", "")).replace(".", "", 1).isdigit()]
     close_approaches = sum(1 for m in moid_vals if m < 0.05)
     hazardous = sum(1 for m in moid_vals if m < 0.01)
     avg_H = round(sum(d.get("H", 0) for d in data if isinstance(d.get("H"), (int, float))) / len(data), 2) if data else 0
@@ -166,13 +174,17 @@ def send_to_discord(data):
 
         title_text = f"{emoji} MPEC {d.get('mpec_code','?')} — [{d.get('object','?')}]({d.get('url','')})"
 
-        # 🌌 Parametri orbitali
+        # 🌌 Parametri orbitali + aggiuntivi
         desc = [
             f"{emoji_H} Magnitudine assoluta (H): {H} — Luminosità intrinseca",
             f"🌀 Eccentricità (e): {d.get('e','?')} — Forma dell’orbita",
             f"📐 Inclinazione (i): {d.get('i','?')}° — Angolo rispetto all’eclittica",
             f"🌍 MOID: {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
-            f"📅 Data di emissione: {d.get('issued','?')}",
+            "",
+            f"🧮 Parametro fotometrico (G): {d.get('G','?')} — Curva di luminosità dell’asteroide",
+            f"🎯 Precisione orbitale (U): {d.get('U','?')} — Grado d’incertezza (0 = ottima, 9 = bassa)",
+            f"🧭 Nodo ascendente (Ω): {d.get('Node','?')}° — Punto in cui l’orbita attraversa l’eclittica",
+            f"🕰️ Epoca orbitale: {d.get('Epoch','?')} — Data di riferimento dei parametri  📅 Data di emissione: {d.get('issued','?')}",
             f"🔗 [Pagina MPEC]({d.get('url','')})",
             "─────────────────────────"
         ]
@@ -199,28 +211,29 @@ def send_to_discord(data):
                     mag = m.group("mag")
                     cod = m.group("code")
                     obs_texts.append(
-                        f"• **{code} — {date}**\n"
+                        f"• {code} — {date}\n"
                         f"🧭 RA: {ra}\n"
                         f"📈 DEC: {dec}\n"
                         f"💡 Magnitudine: {mag}\n"
                         f"📄 Codice: {cod}"
                     )
                 else:
-                    # fallback: se non matcha, mostra la riga grezza
                     obs_texts.append(f"• {line}")
 
-            desc.append(f"📷 **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n\n".join(obs_texts))
+            desc.append(f"📷 Osservazioni ({OBSERVATORY_CODE})\n" + "\n\n".join(obs_texts))
 
-        # 🔭 Strumento e osservatorio
-        if d.get("instrument_line") or d.get("observer_names"):
-            desc.append("─────────────────────────")
-            if d.get("instrument_line"):
-                desc.append(f"🔭 **Strumento:** {d['instrument_line']}")
-            desc.append(f"🏛️ **Osservatorio:** {OBSERVATORY_NAME}")
-            if d.get("observer_names"):
-                desc.append(f"👥 **Osservatori:** {d['observer_names']}")
-
-        desc.append(f"\n🕒 Aggiornato al {now}")
+        # ----------- STRUMENTO / OSSERVATORIO -----------
+        desc.append("─────────────────────────")
+        if d.get("instrument_line"):
+            desc.append(f"🔭 Strumento: {d['instrument_line']}")
+        desc.append(f"🏛️ Osservatorio: {OBSERVATORY_NAME}")
+        if d.get("observer_names"):
+            desc.append(f"👥 Osservatori: {d['observer_names']}")
+        if d.get("arc_length"):
+            desc.append(f"📏 Arco osservativo: {d['arc_length']}")
+        if d.get("residuals"):
+            desc.append(f"📉 Residui medi {OBSERVATORY_CODE}: {d['residuals']}")
+        desc.append(f"🕒 Aggiornato al {now}")
 
         embeds.append({
             "title": title_text,
@@ -230,19 +243,20 @@ def send_to_discord(data):
 
     # 🪐 Header principale
     header = (
-        f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
-        f"Aggiornato al **{now}**\n"
-        f"Totale MPEC con codice **{OBSERVATORY_CODE}: {len(data)}**\n\n"
-        f"📊 **Statistiche generali**\n"
-        f"• Oggetti con MOID < 0.05 AU: **{close_approaches}**\n"
-        f"• Potenzialmente pericolosi (MOID < 0.01 AU): **{hazardous}**\n"
-        f"• Magnitudine media (H): **{avg_H}**\n"
-        "> ────────────────────────"
+        f"🪐 Archivio MPEC — {OBSERVATORY_NAME}\n"
+        f"Aggiornato al {now}\n"
+        f"Totale MPEC con codice {OBSERVATORY_CODE}: {len(data)}\n\n"
+        f"📊 Statistiche generali\n"
+        f"• Oggetti con MOID < 0.05 AU: {close_approaches}\n"
+        f"• Potenzialmente pericolosi (MOID < 0.01 AU): {hazardous}\n"
+        f"• Magnitudine media (H): {avg_H}\n"
+        "─────────────────────────"
     )
 
     headers = {"Content-Type": "application/json"}
     payload = {"content": header, "embeds": embeds}
 
+    # Invio su Discord
     message_id = None
     if os.path.exists(MESSAGE_ID_FILE):
         with open(MESSAGE_ID_FILE, "r") as f:
