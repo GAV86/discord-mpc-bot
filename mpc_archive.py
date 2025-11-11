@@ -180,12 +180,10 @@ def send_to_discord(data):
             f"🌀 Eccentricità (e): {d.get('e','?')} — Forma dell’orbita",
             f"📐 Inclinazione (i): {d.get('i','?')}° — Angolo rispetto all’eclittica",
             f"🌍 MOID: {d.get('MOID','?')} AU — Distanza minima orbitale dalla Terra",
-            "",
             f"🧮 Parametro fotometrico (G): {d.get('G','?')} — Curva di luminosità dell’asteroide",
             f"🎯 Precisione orbitale (U): {d.get('U','?')} — Grado d’incertezza (0 = ottima, 9 = bassa)",
             f"🧭 Nodo ascendente (Ω): {d.get('Node','?')}° — Punto in cui l’orbita attraversa l’eclittica",
-            f"🕰️ Epoca orbitale: {d.get('Epoch','?')} — Data di riferimento dei parametri  📅 Data di emissione: {d.get('issued','?')}",
-            f"🔗 [Pagina MPEC]({d.get('url','')})",
+            f"📅 Data di emissione: {d.get('issued','?')}",
             "─────────────────────────"
         ]
 
@@ -231,8 +229,6 @@ def send_to_discord(data):
             desc.append(f"👥 Osservatori: {d['observer_names']}")
         if d.get("arc_length"):
             desc.append(f"📏 Arco osservativo: {d['arc_length']}")
-        if d.get("residuals"):
-            desc.append(f"📉 Residui medi {OBSERVATORY_CODE}: {d['residuals']}")
         desc.append(f"🕒 Aggiornato al {now}")
 
         embeds.append({
