@@ -185,32 +185,27 @@ def send_to_discord(data):
             "> ─────────────────────────"
         ]
 
-        # ✅ Osservazioni formattate tipo tabella (colonne allineate)
+        # ✅ Osservazioni in formato elenco (ottimizzato per mobile)
         if d.get("observations"):
-            header = f"{'CODICE':<8} {'DATA(UTC)':<12} {'RA(J2000)':<12} {'DEC(J2000)':<12} {'MAG':<5} {'COD':<10}"
-            formatted = []
+            lines = []
             for line in d["observations"]:
                 line = re.sub(r"\s+", " ", line.strip())
                 parts = re.split(r"\s+", line)
                 if len(parts) >= 10:
                     code = parts[0]
-                    date = f"{parts[2]}-{parts[3]}"
+                    date = f"2025-{parts[2]}-{parts[3]}" if len(parts[2]) == 2 else f"{parts[2]}-{parts[3]}"
                     ra = f"{parts[4]} {parts[5]} {parts[6]}"
                     dec = f"{parts[7]} {parts[8]}"
                     mag = parts[9] if re.match(r"^\d", parts[9]) else "—"
                     cod = parts[-1]
-                    formatted.append(f"{code:<8} {date:<12} {ra:<12} {dec:<12} {mag:<5} {cod:<10}")
+                    lines.append(
+                        f"• **{code}** — {date}\n"
+                        f"  🧭 RA: {ra} | DEC: {dec}\n"
+                        f"  💡 Magnitudine: {mag} | 📄 Codice: {cod}"
+                    )
                 else:
-                    formatted.append(line)
-
-            desc.append(
-                f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n"
-                + "```text\n"
-                + header + "\n"
-                + "\n".join(formatted)
-                + "\n```\n"
-                + "_🧭 RA: Ascensione Retta • DEC: Declinazione • MAG: Magnitudine • COD: Codice osservazione MPC_"
-            )
+                    lines.append("• " + line)
+            desc.append(f"👁️ **Osservazioni ({OBSERVATORY_CODE})**\n" + "\n".join(lines))
 
         # ✅ Strumento completo
         if d.get("observatory_details"):
@@ -264,7 +259,6 @@ def send_to_discord(data):
         print("✅ Nuovo messaggio Discord creato.")
     else:
         print(f"❌ Errore invio Discord: {r.status_code}")
-
 
 # ---------------- MAIN ----------------
 def main():
