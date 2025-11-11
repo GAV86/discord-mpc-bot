@@ -156,7 +156,6 @@ def send_to_discord(data):
     for d in sorted(data, key=lambda x: x.get("issued", ""), reverse=True):
         moid = float(d.get("MOID", 1.0)) if isinstance(d.get("MOID"), (int, float, str)) else 1.0
         color = 0x3388ff if moid >= 0.05 else (0xFFD700 if moid >= 0.01 else 0xFF5555)
-
         emoji = "🔵" if moid >= 0.05 else ("🟡" if moid >= 0.01 else "🔴")
 
         H = d.get("H", "?")
@@ -165,7 +164,6 @@ def send_to_discord(data):
             if H < 20: emoji_H = "☀️"
             elif H < 26: emoji_H = "🌕"
 
-        # Titolo principale con link
         title_text = f"{emoji} MPEC {d.get('mpec_code','?')} — [{d.get('object','?')}]({d.get('url','')})"
 
         # 🌌 Parametri orbitali
@@ -179,7 +177,7 @@ def send_to_discord(data):
             "─────────────────────────"
         ]
 
-        # 👁️ Osservazioni formattate verticalmente
+        # 👁️ Osservazioni formattate correttamente
         if d.get("observations"):
             lines = []
             for line in d["observations"]:
@@ -188,14 +186,15 @@ def send_to_discord(data):
                 if len(parts) >= 10:
                     code = parts[0]
                     date = f"2025-{parts[2]}-{parts[3]}" if len(parts[2]) == 2 else f"{parts[2]}-{parts[3]}"
-                    ra = f"{parts[4]} {parts[5]} {parts[6]}"
-                    dec = f"{parts[7]} {parts[8]}"
+                    # Ricostruzione pulita di RA e DEC
+                    ra = " ".join(parts[4:7])
+                    dec = " ".join(parts[7:10])
                     mag = parts[9] if re.match(r"^\d", parts[9]) else "—"
                     cod = parts[-1]
                     lines.append(
                         f"• **{code} — {date}**\n"
-                        f"🧭 RA: {ra}+{dec.split()[0] if len(dec.split()) > 0 else ''}\n"
-                        f"📈 DEC: {' '.join(dec.split()[1:]) if len(dec.split()) > 1 else dec}\n"
+                        f"🧭 RA: {ra}\n"
+                        f"📈 DEC: {dec}\n"
                         f"💡 Magnitudine: {mag}\n"
                         f"📄 Codice: {cod}"
                     )
@@ -212,7 +211,7 @@ def send_to_discord(data):
             if d.get("observer_names"):
                 desc.append(f"👥 **Osservatori:** {d['observer_names']}")
 
-        # Footer finale
+        # Footer
         desc.append(f"\n🕒 Aggiornato al {now}")
 
         embeds.append({
@@ -221,7 +220,7 @@ def send_to_discord(data):
             "color": color
         })
 
-    # 🪐 Header messaggio
+    # 🪐 Header principale
     header = (
         f"🪐 **Archivio MPEC — {OBSERVATORY_NAME}**\n"
         f"Aggiornato al **{now}**\n"
